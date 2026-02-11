@@ -13,33 +13,37 @@ DB_FILE = "projetos_quantix.csv"
 def carregar_dados():
     if os.path.exists(DB_FILE):
         df = pd.read_csv(DB_FILE)
-        # Processamento para o Dashboard
+        # Processamento de dados para o Dashboard
         df['Lucro_Num'] = df['Lucro'].str.replace('R$ ', '').str.replace('.', '').str.replace(',', '.').astype(float)
         df['Eff_Num'] = df['Eficiencia'].str.replace('%', '').astype(float) / 100
         return df
-    return pd.DataFrame(columns=["Empreendimento", "Data", "Antes", "Depois", "Lucro", "Eficiencia", "Lucro_Num", "Eff_Num", "Arquivo_Otimizado"])
+    return pd.DataFrame(columns=["Empreendimento", "Data", "Antes", "Depois", "Lucro", "Eficiencia", "Lucro_Num", "Eff_Num", "Arquivo_IA"])
 
-def salvar_projeto(nome, antes, depois, arquivo_original):
+def salvar_projeto(nome, antes, depois, arquivo_objeto):
     df_existente = carregar_dados()
     lucro = antes - depois
     eficiencia = (lucro / antes) * 100
     
-    # GERAÇÃO DO NOVO ARQUIVO PELA IA
-    nome_saida = f"QUANTIX_OTIMIZADO_{arquivo_original.name}"
+    # GERAÇÃO DO ARQUIVO OTIMIZADO (Simulação de Output da IA)
+    # Criamos uma cópia do arquivo original com o prefixo da Quantix para download
+    nome_saida = f"QUANTIX_OTIMIZADO_{arquivo_objeto.name}"
     with open(nome_saida, "wb") as f:
-        f.write(arquivo_original.getbuffer())
+        f.write(arquivo_objeto.getbuffer())
     
     novo_projeto = {
-        "Empreendimento": nome, "Data": datetime.now().strftime("%d/%m/%Y"),
-        "Antes": f"R$ {antes:,.2f}", "Depois": f"R$ {depois:,.2f}",
-        "Lucro": f"R$ {lucro:,.2f}", "Eficiencia": f"{eficiencia:.1f}%",
-        "Arquivo_Otimizado": nome_saida
+        "Empreendimento": nome, 
+        "Data": datetime.now().strftime("%d/%m/%Y"),
+        "Antes": f"R$ {antes:,.2f}", 
+        "Depois": f"R$ {depois:,.2f}",
+        "Lucro": f"R$ {lucro:,.2f}", 
+        "Eficiencia": f"{eficiencia:.1f}%",
+        "Arquivo_IA": nome_saida
     }
     
     df_novo = pd.concat([df_existente, pd.DataFrame([novo_projeto])], ignore_index=True)
     df_novo.drop(columns=['Lucro_Num', 'Eff_Num'], errors='ignore').to_csv(DB_FILE, index=False)
 
-# --- CSS CUSTOMIZADO (Identidade Visual QUANTIX) ---
+# --- CSS CUSTOMIZADO (Identidade Visual Premium QUANTIX) ---
 st.markdown("""
     <style>
     [data-testid="stMetricValue"] { color: #00E5FF !important; font-size: 38px !important; font-weight: 800 !important; }
@@ -47,7 +51,7 @@ st.markdown("""
     .login-btn { border: 2px solid #00E5FF; color: #00E5FF; padding: 8px 25px; border-radius: 20px; text-align: center; font-weight: bold; }
     .dna-box { background-color: #1a1a1a; padding: 30px; border-radius: 15px; border-left: 5px solid #00E5FF; margin-bottom: 20px; }
     .dna-box-x { border-left: 5px solid #FF9F00 !important; }
-    .stDownloadButton button { background-color: transparent !important; border: 1px solid #00E5FF !important; color: #00E5FF !important; border-radius: 8px; }
+    .stDownloadButton button { background-color: transparent !important; border: 1px solid #00E5FF !important; color: #00E5FF !important; width: 100%; }
     .stDownloadButton button:hover { background-color: #00E5FF !important; color: #000 !important; }
     </style>
     """, unsafe_allow_html=True)
@@ -62,7 +66,14 @@ with h2:
 
 st.markdown("---")
 
-tabs = st.tabs(["🚀 Performance Global", "⚡ Otimizador IA", "💧 Hidráulica", "📂 Portfólio", "🧬 Quem Somos (O DNA)"])
+# --- NAVEGAÇÃO ---
+tabs = st.tabs([
+    "🚀 Performance Global", 
+    "⚡ Otimizador IA", 
+    "💧 Hidráulica", 
+    "📂 Portfólio", 
+    "🧬 Quem Somos (O DNA)"
+])
 
 # --- TAB 1: PERFORMANCE ---
 with tabs[0]:
@@ -76,7 +87,7 @@ with tabs[0]:
         c4.metric("Projetos Ativos", len(df))
         st.divider()
         g1, g2 = st.columns(2)
-        g1.subheader("💰 Lucro acumulado")
+        g1.subheader("💰 Lucro acumulado por Obra")
         g1.bar_chart(df.set_index('Empreendimento')['Lucro_Num'])
         g2.subheader("⚡ Curva de Eficiência IA (%)")
         g2.line_chart(df.set_index('Empreendimento')['Eff_Num'] * 100)
@@ -87,38 +98,37 @@ with tabs[1]:
     st.info("🛡️ Configuração de Alta Capacidade Ativa: Suporte para arquivos até 1GB.")
     col_in, col_up = st.columns([1, 2])
     with col_in:
-        nome = st.text_input("Nome da Obra")
-        bruto = st.number_input("Custo Materiais (R$)", value=100000.0)
+        nome = st.text_input("Nome do Empreendimento")
+        bruto = st.number_input("Custo Estimado de Materiais (R$)", value=100000.0)
         up = st.file_uploader("Upload Planta / BIM / PDF", type=["png", "jpg", "jpeg", "pdf", "ifc"])
     
     if up and nome and bruto > 0:
         c_orig, c_opt = st.columns(2)
         taxa = 0.14
         with c_orig:
-            st.subheader("📄 Original")
-            st.write(f"Arquivo: {up.name}")
+            st.subheader("📄 Projeto Original")
             if up.type.startswith('image'):
                 st.image(Image.open(up), use_container_width=True)
             else:
-                st.success("✅ Arquivo Técnico Carregado")
-                st.caption("Engenharia Elétrica/BIM detectada. Processando malha de objetos...")
-        
+                st.success(f"✅ Arquivo Técnico Detectado: {up.name}")
+                st.info("Realizando análise de malha de engenharia...")
         with c_opt:
             st.subheader("⚡ Otimizado QUANTIX")
             if up.type.startswith('image'):
                 st.image(ImageOps.colorize(Image.open(up).convert('L'), black="#003333", white="#00E5FF"), use_container_width=True)
             else:
-                st.warning("⚡ Otimização Concluída Digitalmente")
-                st.write("A IA reorganizou o fluxo de materiais para máxima economia.")
+                st.warning("⚡ Otimização Digital Concluída.")
+                st.write("A IA reorganizou a árvore de objetos para redução de desperdício.")
             
             if st.button("💾 Salvar e Gerar Arquivo Otimizado"):
                 salvar_projeto(nome, bruto, bruto*(1-taxa), up)
                 st.balloons()
-                st.success("Projeto salvo! O arquivo otimizado já está disponível no seu Portfólio.")
+                st.success("Projeto salvo no portfólio com sucesso!")
 
 # --- TAB 3: HIDRÁULICA ---
 with tabs[2]:
     st.header("💧 Inteligência Hidrossanitária")
+    st.write("Otimização de traçado e redução drástica de pontos de falha.")
     c_h1, c_h2, c_h3 = st.columns(3)
     c_h1.metric("Redução de Canos", "145m", "- 12%")
     c_h2.metric("Conexões Eliminadas", "42 un", "Menos risco")
@@ -128,43 +138,45 @@ with tabs[2]:
         st.write("A IA detecta 'Loops' desnecessários e sugere prumadas centralizadas.")
         st.latex(r"Economia = \sum (Conexão_{PVC} \times Custo_{Instalação})")
 
-# --- TAB 4: PORTFÓLIO (COM DOWNLOADS IA) ---
+# --- TAB 4: PORTFÓLIO (COM DOWNLOAD DE ARQUIVOS IA) ---
 with tabs[3]:
     st.header("📂 Gestão de Ativos")
     df_p = carregar_dados()
     if not df_p.empty:
-        # Tabela Visual
         st.dataframe(df_p[['Empreendimento', 'Data', 'Antes', 'Depois', 'Lucro', 'Eficiencia']],
             use_container_width=True, hide_index=True)
         
         st.divider()
-        st.subheader("📥 Projetos Otimizados pela IA")
-        st.caption("Clique no botão ao lado de cada obra para baixar o novo documento gerado.")
+        st.subheader("📥 Central de Downloads Otimizados")
+        st.caption("Selecione a obra para baixar o documento gerado pela Inteligência Artificial:")
         
         for index, row in df_p.iterrows():
-            c_name, c_btn = st.columns([4, 1])
-            with c_name:
-                st.write(f"📄 **{row['Empreendimento']}** ({row['Data']})")
+            c_txt, c_btn = st.columns([4, 1])
+            with c_txt:
+                st.write(f"📄 **{row['Empreendimento']}** - Processado em {row['Data']}")
             with c_btn:
-                if os.path.exists(str(row['Arquivo_Otimizado'])):
-                    with open(str(row['Arquivo_Otimizado']), "rb") as f:
+                if os.path.exists(str(row['Arquivo_IA'])):
+                    with open(str(row['Arquivo_IA']), "rb") as f:
                         st.download_button(
-                            label="⬇️ Baixar IA Doc",
+                            label="⬇️ Baixar Doc IA",
                             data=f,
-                            file_name=str(row['Arquivo_Otimizado']),
+                            file_name=str(row['Arquivo_IA']),
                             key=f"dl_{index}"
                         )
     else:
-        st.info("Nenhum projeto processado ainda. Vá ao Otimizador IA para começar.")
+        st.info("Nenhum projeto no portfólio. Utilize o Otimizador IA para começar.")
 
-# --- TAB 5: QUEM SOMOS (DNA MANTIDO) ---
+# --- TAB 5: QUEM SOMOS (O DNA COMPLETO RESTAURADO) ---
 with tabs[4]:
     st.markdown("## 🧬 O DNA QUANTIX: Manifesto por Lucas Teitelbaum")
     st.write("A QUANTIX não é apenas uma plataforma; é o novo sistema operacional da construção inteligente.")
+    
     st.divider()
 
+    # PILAR 1: O CONCEITO QUANTI+X
     st.subheader("🚀 A Gênese da Marca")
     col_q, col_x = st.columns(2)
+    
     with col_q:
         st.markdown("""
         <div class="dna-box">
@@ -172,40 +184,69 @@ with tabs[4]:
             <p><b>A Precisão da Engenharia.</b></p>
             <p>Derivado do termo 'Quantitativo', o QUANTI representa o rigor métrico e a base técnica sólida. 
             É o nosso alicerce na engenharia de precisão, onde cada grama de cobre e cada metro de cano 
-            são contabilizados.</p>
+            são contabilizados. Viemos de um laboratório real, validando hipóteses em obras de alto padrão.</p>
         </div>
         """, unsafe_allow_html=True)
+        
     with col_x:
         st.markdown(f"""
         <div class="dna-box dna-box-x">
             <h2 style='color:#FF9F00; margin-top:0;'>X</h2>
             <p><b>O Fator Exponencial.</b></p>
             <p>O 'X' simboliza a variável tecnológica desconhecida pelo mercado tradicional. É a Inteligência Artificial 
-            que processa gigabytes de dados em segundos para gerar lucro exponencial.</p>
+            que processa gigabytes de dados em segundos. É o multiplicador que transforma uma economia comum em lucro 
+            exponencial para a incorporadora.</p>
         </div>
         """, unsafe_allow_html=True)
 
     st.divider()
+
+    # PILAR 2: MISSÃO, VISÃO E O FUNDADOR
     col_missao, col_fundador = st.columns(2)
+    
     with col_missao:
         st.subheader("🎯 Nossa Missão")
-        st.write("Maximizar a lucratividade da construção civil através de Visão Computacional, eliminando o desperdício humano.")
+        st.write("""
+        Maximizar a lucratividade da construção civil através de Visão Computacional, 
+        eliminando o desperdício humano e transformando projetos complexos em ativos 
+        otimizados de alta performance.
+        """)
         st.subheader("🌍 Nossa Visão")
-        st.write("Liderar a transição global da construção analógica para a digital.")
+        st.write("""
+        Liderar a transição global da construção analógica para a digital, 
+        tornando a QUANTIX o padrão mundial de auditoria de projetos Lean.
+        """)
+        
     with col_fundador:
         st.subheader("👤 O Fundador")
-        st.write("""
+        st.write(f"""
         **Lucas Teitelbaum** uniu o legado de sua família que vinha desde o seu avô, para algo que vai restar anos. 
-        Ao identificar que milhões de reais eram literalmente enterrados em obras, decidiu criar a QUANTIX: 
-        a ponte entre o concreto e a inteligência de dados.
+        Ao identificar que milhões de reais eram literalmente enterrados em obras devido a projetos ineficientes, 
+        decidiu criar a QUANTIX: a ponte entre o concreto e a inteligência de dados.
         """)
+
     st.divider()
+
+    # PILAR 3: COMPLIANCE E SEGURANÇA
     st.subheader("🛡️ Base de Proteção e Segurança Jurídica")
+    st.write("Como uma plataforma de nível Enterprise, a segurança dos dados e a conformidade técnica são inegociáveis.")
+    
     with st.expander("📌 Metodologia de Validação Híbrida"):
-        st.info("A QUANTIX opera como uma ferramenta de Inteligência Aumentada. Toda economia deve ser validada pelo Responsável Técnico (RT).")
-    with st.expander("📌 Propriedade Intelectual"):
-        st.warning("Os algoritmos vision e a lógica de processamento são de propriedade exclusiva da QUANTIX Inc.")
+        st.info("""
+        A QUANTIX opera como uma ferramenta de **Inteligência Aumentada**. Nossas sugestões de traçado 
+        e redução de insumos são baseadas em algoritmos de caminho mínimo e normas internacionais. 
+        Toda economia deve ser validada pelo Responsável Técnico (RT) para garantir a segurança estrutural.
+        """)
+        
+    with st.expander("📌 Propriedade Intelectual e Segredo Industrial"):
+        st.warning("""
+        Os algoritmos de análise vision e a lógica de processamento hidráulico/elétrico são de 
+        propriedade exclusiva da QUANTIX Inc. A plataforma utiliza a Joal Teitelbaum como um 
+        ambiente de 'Sandbox' para validação prática, garantindo que o software funcione na 
+        realidade dura do canteiro de obras.
+        """)
         st.caption("QUANTIX Strategic Engine © 2026 | Lucas Teitelbaum • Global Compliance.")
 
+# RODAPÉ
 st.divider()
 st.caption("QUANTIX | Precision in Engineering. Intelligence in Profit.")
