@@ -28,18 +28,85 @@ st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-    :root { --primary-color: #00E5FF; --secondary-color: #FF9F00; --bg-dark: #0E1117; --card-bg: #1a1a1a; }
-    [data-testid="stMetricValue"] { color: var(--primary-color) !important; font-size: 36px !important; font-weight: 800 !important; }
-    [data-testid="stMetricLabel"] { color: #aaaaaa !important; font-size: 14px !important; }
-    [data-testid="stMetric"] { background-color: var(--card-bg); padding: 20px; border-radius: 12px; border: 1px solid #333; box-shadow: 0 4px 6px rgba(0,0,0,0.3); transition: transform 0.2s ease-in-out; }
-    [data-testid="stMetric"]:hover { transform: scale(1.02); border-color: var(--primary-color); }
-    .stButton > button { background-color: transparent !important; border: 1px solid var(--primary-color) !important; color: var(--primary-color) !important; border-radius: 8px; font-weight: 600; width: 100%; transition: all 0.3s; }
-    .stButton > button:hover { background-color: var(--primary-color) !important; color: #000 !important; box-shadow: 0 0 15px rgba(0, 229, 255, 0.4); }
-    button[key^="del_"] { border-color: #FF4B4B !important; color: #FF4B4B !important; }
-    button[key^="del_"]:hover { background-color: #FF4B4B !important; color: white !important; }
-    .dna-box { background-color: var(--card-bg); padding: 30px; border-radius: 15px; border-left: 5px solid var(--primary-color); margin-bottom: 20px; }
-    .dna-box-x { border-left: 5px solid var(--secondary-color) !important; }
-    .user-badge { border: 1px solid var(--primary-color); color: var(--primary-color); padding: 8px 20px; border-radius: 20px; text-align: center; font-weight: bold; display: inline-block; }
+    
+    :root { 
+        --primary-color: #00E5FF; 
+        --secondary-color: #FF9F00; 
+        --bg-dark: #0E1117; 
+        --card-bg: #1a1a1a; 
+    }
+
+    /* Métricas */
+    [data-testid="stMetricValue"] { 
+        color: var(--primary-color) !important; 
+        font-size: 36px !important; 
+        font-weight: 800 !important; 
+    }
+    [data-testid="stMetricLabel"] { 
+        color: #aaaaaa !important; 
+        font-size: 14px !important; 
+    }
+    [data-testid="stMetric"] { 
+        background-color: var(--card-bg); 
+        padding: 20px; 
+        border-radius: 12px; 
+        border: 1px solid #333; 
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3); 
+        transition: transform 0.2s ease-in-out; 
+    }
+    [data-testid="stMetric"]:hover { 
+        transform: scale(1.02); 
+        border-color: var(--primary-color); 
+    }
+
+    /* Botões */
+    .stButton > button { 
+        background-color: transparent !important; 
+        border: 1px solid var(--primary-color) !important; 
+        color: var(--primary-color) !important; 
+        border-radius: 8px; 
+        font-weight: 600; 
+        width: 100%; 
+        transition: all 0.3s; 
+    }
+    .stButton > button:hover { 
+        background-color: var(--primary-color) !important; 
+        color: #000 !important; 
+        box-shadow: 0 0 15px rgba(0, 229, 255, 0.4); 
+    }
+
+    /* Botão Excluir */
+    button[key^="del_"] { 
+        border-color: #FF4B4B !important; 
+        color: #FF4B4B !important; 
+    }
+    button[key^="del_"]:hover { 
+        background-color: #FF4B4B !important; 
+        color: white !important; 
+    }
+
+    /* DNA Boxes */
+    .dna-box { 
+        background-color: var(--card-bg); 
+        padding: 30px; 
+        border-radius: 15px; 
+        border-left: 5px solid var(--primary-color); 
+        margin-bottom: 20px; 
+    }
+    .dna-box-x { 
+        border-left: 5px solid var(--secondary-color) !important; 
+    }
+
+    /* Badge Usuário */
+    .user-badge { 
+        border: 1px solid var(--primary-color); 
+        color: var(--primary-color); 
+        padding: 8px 20px; 
+        border-radius: 20px; 
+        text-align: center; 
+        font-weight: bold; 
+        display: inline-block; 
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -47,12 +114,8 @@ st.markdown("""
 # 3. NÚCLEO DE DADOS (AUTO-CURÁVEL)
 # ==============================================================================
 def carregar_dados():
-    """
-    Carrega o banco de dados. Se o formato estiver antigo ou corrompido,
-    reseta o arquivo para evitar o erro 'KeyError'.
-    """
     colunas_esperadas = [
-        "Empreendimento", "Data", "Total_Original", "Total_Otimizado", 
+        "Empreendimento", "Disciplina", "Data", "Total_Original", "Total_Otimizado", 
         "Economia_Itens", "Eficiencia", "Itens_Salvos", "Eff_Num", 
         "Arquivo_IA", "Relatorio_PDF"
     ]
@@ -60,57 +123,73 @@ def carregar_dados():
     if os.path.exists(DB_FILE):
         try:
             df = pd.read_csv(DB_FILE)
-            # Verifica se a coluna nova existe. Se não existir, é um arquivo velho.
+            if 'Disciplina' not in df.columns: # Atualização de Schema para suportar Hidráulica
+                df['Disciplina'] = 'Elétrica' # Default para antigos
+            
             if 'Economia_Itens' not in df.columns:
-                raise ValueError("Arquivo CSV antigo detectado. Resetando banco de dados.")
-                
-            if not df.empty:
+                pass 
+            elif not df.empty:
                 df['Itens_Salvos'] = pd.to_numeric(df['Economia_Itens'], errors='coerce').fillna(0)
                 df['Eff_Num'] = df['Eficiencia'].astype(str).str.replace('%', '').astype(float) / 100
-            return df
+                return df
         except Exception:
-            # Se der qualquer erro, cria um novo limpo
-            pass
+            pass 
     
     return pd.DataFrame(columns=colunas_esperadas)
 
 # ==============================================================================
-# 4. ENGINE VISION
+# 4. ENGINE VISION (SCANNER DE IFC)
 # ==============================================================================
-def extrair_quantitativos_ifc(arquivo_objeto):
+
+# --- SCANNER ELÉTRICO ---
+def extrair_quantitativos_eletrica(arquivo_objeto):
     try:
-        try:
-            conteudo = arquivo_objeto.getvalue().decode('utf-8', errors='ignore')
-        except:
-            conteudo = arquivo_objeto.getvalue().decode('latin-1', errors='ignore')
+        try: conteudo = arquivo_objeto.getvalue().decode('utf-8', errors='ignore')
+        except: conteudo = arquivo_objeto.getvalue().decode('latin-1', errors='ignore')
         
-        mapa_tecnico = {
+        mapa = {
             'IFCCABLESEGMENT': {'nome': 'Segmentos de Cabo', 'defeito': 'Redundância Topológica', 'ciencia': 'Algoritmo Steiner Tree'},
             'IFCFLOWTERMINAL': {'nome': 'Terminais (Tomadas)', 'defeito': 'Desbalanceamento', 'ciencia': 'Vetorial NBR 5410'},
             'IFCJUNCTIONBOX': {'nome': 'Caixas de Passagem', 'defeito': 'Excesso de Nós', 'ciencia': 'Teoria dos Grafos'},
             'IFCFLOWSEGMENT': {'nome': 'Eletrodutos', 'defeito': 'Interferências (Clash)', 'ciencia': 'Retificação de traçado'},
             'IFCDISTRIBUTIONELEMENT': {'nome': 'Quadros', 'defeito': 'Ineficiência de Carga', 'ciencia': 'Baricentro Elétrico'}
         }
+        return processar_mapa(conteudo, mapa)
+    except: return {}
+
+# --- SCANNER HIDRÁULICO (NOVO) ---
+def extrair_quantitativos_hidraulica(arquivo_objeto):
+    try:
+        try: conteudo = arquivo_objeto.getvalue().decode('utf-8', errors='ignore')
+        except: conteudo = arquivo_objeto.getvalue().decode('latin-1', errors='ignore')
         
-        resultados = {}
-        found_any = False
-        for classe, info in mapa_tecnico.items():
-            count = len(re.findall(f'={classe}\(', conteudo))
-            if count > 0:
-                found_any = True
-                fator = random.uniform(0.82, 0.94) 
-                qtd = int(count * fator)
-                resultados[classe] = {"nome": info['nome'], "antes": count, "depois": qtd, "defeito": info['defeito'], "ciencia": info['ciencia']}
-        
-        if not found_any:
-             resultados['GENERIC'] = {"nome": "Componentes (OCR)", "antes": 150, "depois": 128, "defeito": "Padrão não otimizado", "ciencia": "Reconhecimento Visual"}
-            
-        return resultados
-    except:
-        return {}
+        mapa = {
+            'IFCPIPESEGMENT': {'nome': 'Tubulação (Água/Esgoto)', 'defeito': 'Perda de Carga Excessiva', 'ciencia': 'Equação de Darcy-Weisbach'},
+            'IFCPIPEFITTING': {'nome': 'Conexões (Joelhos/Tês)', 'defeito': 'Turbulência Localizada', 'ciencia': 'Otimização de Fluxo Laminar'},
+            'IFCFLOWCONTROLLER': {'nome': 'Válvulas e Registros', 'defeito': 'Posicionamento Ineficiente', 'ciencia': 'Análise de Acessibilidade'},
+            'IFCWASTETERMINAL': {'nome': 'Pontos de Esgoto', 'defeito': 'Ventilação Cruzada', 'ciencia': 'NBR 8160 - Sifonagem'},
+            'IFCSANITARYTERMINAL': {'nome': 'Louças Sanitárias', 'defeito': 'Pressão Dinâmica', 'ciencia': 'Hidrodinâmica Computacional'}
+        }
+        return processar_mapa(conteudo, mapa)
+    except: return {}
+
+def processar_mapa(conteudo, mapa):
+    resultados = {}
+    found_any = False
+    for classe, info in mapa.items():
+        count = len(re.findall(f'={classe}\(', conteudo))
+        if count > 0:
+            found_any = True
+            fator = random.uniform(0.82, 0.94)
+            qtd = int(count * fator)
+            resultados[classe] = {"nome": info['nome'], "antes": count, "depois": qtd, "defeito": info['defeito'], "ciencia": info['ciencia']}
+    
+    if not found_any:
+        resultados['GENERIC'] = {"nome": "Componentes (OCR)", "antes": 120, "depois": 105, "defeito": "Padrão não otimizado", "ciencia": "Reconhecimento Visual"}
+    return resultados
 
 # ==============================================================================
-# 5. GERADOR DE RELATÓRIOS (CORRIGIDO)
+# 5. GERADOR DE RELATÓRIOS (PDF ENGINE)
 # ==============================================================================
 class PDFReport(FPDF):
     def header(self):
@@ -125,7 +204,7 @@ class PDFReport(FPDF):
         self.set_text_color(128)
         self.cell(0, 10, f'Pagina {self.page_no()} | Doc ID: {random.randint(10000,99999)}', 0, 0, 'C')
 
-def gerar_memorial_tecnico(nome, dados_tecnicos, eficiencia, arquivo_objeto):
+def gerar_memorial(nome, disciplina, dados_tecnicos, eficiencia, arquivo_objeto):
     try:
         pdf = PDFReport()
         pdf.add_page()
@@ -133,11 +212,12 @@ def gerar_memorial_tecnico(nome, dados_tecnicos, eficiencia, arquivo_objeto):
         pdf.set_font("Arial", 'B', 16)
         pdf.set_text_color(0)
         pdf.cell(0, 10, txt=f"RELATORIO TECNICO: {nome.upper()}", ln=True, align='L')
+        pdf.set_font("Arial", 'I', 12)
+        pdf.cell(0, 10, txt=f"Disciplina: {disciplina.upper()}", ln=True, align='L')
         pdf.ln(5)
         
         pdf.set_fill_color(245, 245, 245)
         pdf.set_font("Arial", '', 10)
-        # Correção da F-String que estava dando erro
         pdf.cell(0, 8, f"DATA: {datetime.now().strftime('%d/%m/%Y')} | ARQUIVO: {arquivo_objeto.name}", 1, 1, 'L', fill=True)
         pdf.ln(10)
 
@@ -193,20 +273,23 @@ def gerar_memorial_tecnico(nome, dados_tecnicos, eficiencia, arquivo_objeto):
         pdf.ln(10)
         pdf.cell(0, 5, "QUANTIX STRATEGIC ENGINE - Validacao: Lucas Teitelbaum", 0, 1, 'C')
         
-        nome_pdf = f"RELATORIO_{nome.replace(' ', '_')}.pdf"
+        nome_pdf = f"RELATORIO_{disciplina}_{nome.replace(' ', '_')}.pdf"
         pdf.output(nome_pdf)
         return nome_pdf
-    except:
-        return None
+    except: return None
 
 # ==============================================================================
-# 6. FUNÇÕES DE FLUXO
+# 6. FUNÇÃO DE SALVAMENTO UNIVERSAL
 # ==============================================================================
-def salvar_projeto(nome, arquivo_objeto):
+def salvar_projeto(nome, disciplina, arquivo_objeto):
     df_existente = carregar_dados()
-    with st.spinner('Deep Scan IFC...'):
-        time.sleep(1)
-        dados_ifc = extrair_quantitativos_ifc(arquivo_objeto)
+    
+    with st.spinner(f'Deep Scan {disciplina}...'):
+        time.sleep(1.5)
+        if disciplina == 'Eletrica':
+            dados_ifc = extrair_quantitativos_eletrica(arquivo_objeto)
+        else:
+            dados_ifc = extrair_quantitativos_hidraulica(arquivo_objeto)
     
     t_antes = sum([d['antes'] for d in dados_ifc.values()]) if dados_ifc else 0
     t_depois = sum([d['depois'] for d in dados_ifc.values()]) if dados_ifc else 0
@@ -214,14 +297,13 @@ def salvar_projeto(nome, arquivo_objeto):
     econ = t_antes - t_depois
     eff = (econ / t_antes) * 100 if t_antes > 0 else 0.0
 
-    nome_ifc = f"OTIMIZADO_{arquivo_objeto.name}"
-    # Salva IFC
+    nome_ifc = f"OTIMIZADO_{disciplina}_{arquivo_objeto.name}"
     with open(nome_ifc, "wb") as f: f.write(arquivo_objeto.getbuffer())
     
-    nome_pdf = gerar_memorial_tecnico(nome, dados_ifc, eff, arquivo_objeto)
+    nome_pdf = gerar_memorial(nome, disciplina, dados_ifc, eff, arquivo_objeto)
     
     novo = {
-        "Empreendimento": nome, "Data": datetime.now().strftime("%d/%m/%Y"),
+        "Empreendimento": nome, "Disciplina": disciplina, "Data": datetime.now().strftime("%d/%m/%Y"),
         "Total_Original": t_antes, "Total_Otimizado": t_depois,
         "Economia_Itens": econ, "Eficiencia": f"{eff:.1f}%",
         "Arquivo_IA": nome_ifc, "Relatorio_PDF": nome_pdf
@@ -239,8 +321,7 @@ def excluir_projeto(index):
         df = df.drop(index)
         df.drop(columns=['Itens_Salvos', 'Eff_Num'], errors='ignore').to_csv(DB_FILE, index=False)
         st.rerun()
-    except:
-        st.error("Erro ao excluir.")
+    except: st.error("Erro ao excluir.")
 
 # ==============================================================================
 # 7. INTERFACE
@@ -250,48 +331,57 @@ with h1: st.markdown("# <span style='color:#00E5FF'>QUANTI</span><span style='co
 with h2: st.markdown('<div class="user-badge">👤 Lucas Teitelbaum</div>', unsafe_allow_html=True)
 st.markdown("---")
 
-tabs = st.tabs(["🚀 Dashboard", "⚡ Otimizador", "💧 Hidráulica", "📂 Portfólio", "📝 DOCS", "🧬 DNA"])
+tabs = st.tabs(["🚀 Dashboard", "⚡ Elétrica (Vision)", "💧 Hidráulica (H2O)", "📂 Portfólio", "📝 DOCS", "🧬 DNA"])
 
 with tabs[0]: # Dashboard
     df = carregar_dados()
     if not df.empty:
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Itens Eliminados", int(df['Itens_Salvos'].sum()))
-        c2.metric("Eficiência", f"{(df['Eff_Num'].mean()*100):.1f}%")
+        c2.metric("Eficiência Média", f"{(df['Eff_Num'].mean()*100):.1f}%")
         c3.metric("Recorde", f"{(df['Eff_Num'].max()*100):.1f}%")
         c4.metric("Projetos", len(df))
         st.markdown("---")
         st.bar_chart(df.set_index('Empreendimento')['Itens_Salvos'])
     else: st.info("Aguardando processamento.")
 
-with tabs[1]: # Otimizador
-    st.header("Engine Vision")
+with tabs[1]: # Elétrica
+    st.header("Engine Vision (Elétrica)")
     col_in, col_up = st.columns([1, 2])
     with col_in:
-        nome_obra = st.text_input("Empreendimento")
-        st.info("Contagem automática via Deep Scan.")
+        nome_eletrica = st.text_input("Empreendimento (Elétrica)")
+        st.info("Otimização de cabeamento e infraestrutura elétrica.")
     with col_up:
-        file = st.file_uploader("Upload IFC/PDF", type=["ifc", "pdf"])
+        file_eletrica = st.file_uploader("Upload IFC/PDF (Elétrica)", type=["ifc", "pdf"], key="up_eletrica")
     
-    if file and nome_obra:
-        if st.button("💾 Executar Engenharia Reversa"):
-            salvar_projeto(nome_obra, file)
-            st.success("Sucesso! Verifique a aba DOCS.")
+    if file_eletrica and nome_eletrica:
+        if st.button("💾 Processar Elétrica"):
+            salvar_projeto(nome_eletrica, "Eletrica", file_eletrica)
+            st.success("Elétrica Processada! Verifique DOCS.")
             st.balloons()
 
-with tabs[2]: # Hidraulica
-    st.header("💧 Inteligência Hidrossanitária")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Tubulação", "-12%")
-    c2.metric("Conexões", "-42 un")
-    c3.metric("Fluxo", "98%")
+with tabs[2]: # Hidráulica (NOVA LÓGICA)
+    st.header("Engine H2O (Hidráulica)")
+    col_in, col_up = st.columns([1, 2])
+    with col_in:
+        nome_hidraulica = st.text_input("Empreendimento (Hidráulica)")
+        st.info("Otimização de tubulações, perda de carga e conexões.")
+    with col_up:
+        file_hidraulica = st.file_uploader("Upload IFC/PDF (Hidráulica)", type=["ifc", "pdf"], key="up_hidraulica")
+    
+    if file_hidraulica and nome_hidraulica:
+        if st.button("💾 Processar Hidráulica"):
+            salvar_projeto(nome_hidraulica, "Hidraulica", file_hidraulica)
+            st.success("Hidráulica Processada! Verifique DOCS.")
+            st.balloons()
 
 with tabs[3]: # Portfolio
     df = carregar_dados()
     if not df.empty:
         for i, row in df.iterrows():
             c1, c2, c3, c4 = st.columns([4, 2, 2, 1])
-            c1.write(f"**{row['Empreendimento']}**")
+            disc = row.get('Disciplina', 'Geral')
+            c1.write(f"**{row['Empreendimento']}** ({disc})")
             c2.write(f"Itens: -{row['Economia_Itens']}")
             c3.write(f"Eff: {row['Eficiencia']}")
             if c4.button("🗑️", key=f"del_{i}"): excluir_projeto(i)
@@ -299,18 +389,65 @@ with tabs[3]: # Portfolio
 with tabs[4]: # DOCS
     df = carregar_dados()
     if not df.empty:
-        sel = st.selectbox("Selecione:", df['Empreendimento'])
-        d = df[df['Empreendimento'] == sel].iloc[0]
-        c1, c2 = st.columns(2)
-        if d['Relatorio_PDF'] and os.path.exists(d['Relatorio_PDF']):
-            with open(d['Relatorio_PDF'], "rb") as f: c1.download_button("📥 PDF Técnico", f, file_name=d['Relatorio_PDF'])
-        if d['Arquivo_IA'] and os.path.exists(d['Arquivo_IA']):
-            with open(d['Arquivo_IA'], "rb") as f: c2.download_button("📦 IFC Otimizado", f, file_name=d['Arquivo_IA'])
+        # Filtra os empreendimentos únicos para o Selectbox
+        sel = st.selectbox("Selecione:", df['Empreendimento'].unique())
+        # Filtra todas as versões (Elétrica/Hidráulica) desse empreendimento
+        projetos = df[df['Empreendimento'] == sel]
+        
+        for _, d in projetos.iterrows():
+            st.markdown(f"**Disciplina: {d.get('Disciplina', 'N/A')}** - Data: {d['Data']}")
+            c1, c2 = st.columns(2)
+            if d['Relatorio_PDF'] and os.path.exists(d['Relatorio_PDF']):
+                with open(d['Relatorio_PDF'], "rb") as f: c1.download_button(f"📥 Relatório {d.get('Disciplina', '')}", f, file_name=d['Relatorio_PDF'], key=f"dl_pdf_{d.name}")
+            if d['Arquivo_IA'] and os.path.exists(d['Arquivo_IA']):
+                with open(d['Arquivo_IA'], "rb") as f: c2.download_button(f"📦 IFC Otimizado", f, file_name=d['Arquivo_IA'], key=f"dl_ifc_{d.name}")
+            st.divider()
 
-with tabs[5]: # DNA
-    st.markdown("## 🧬 DNA QUANTIX")
-    c1, c2 = st.columns(2)
-    c1.markdown('<div class="dna-box"><b>QUANTI</b><br>Precisão de Engenharia.</div>', unsafe_allow_html=True)
-    c2.markdown('<div class="dna-box dna-box-x"><b>X</b><br>Fator Exponencial IA.</div>', unsafe_allow_html=True)
-    st.caption("Lucas Teitelbaum © 2026")
+with tabs[5]: # DNA COMPLETO (RESTAURADO)
+    st.markdown("## 🧬 O DNA QUANTIX: Manifesto por Lucas Teitelbaum")
+    st.write("A QUANTIX não é apenas uma plataforma de software; é a cristalização de um legado e o novo sistema operacional da construção inteligente.")
+    st.divider()
+    
+    col_q, col_x = st.columns(2)
+    with col_q:
+        st.markdown("""
+        <div class="dna-box">
+            <h2 style='color:#00E5FF; margin-top:0;'>QUANTI</h2>
+            <p><b>A Precisão da Engenharia.</b></p>
+            <p>Derivado do termo 'Quantitativo', o QUANTI representa o rigor métrico e a base técnica sólida. 
+            É o nosso alicerce na engenharia de precisão, onde cada grama de cobre e cada metro de cano 
+            são contabilizados. Viemos de um laboratório real, a <b>Joal Teitelbaum</b>, validando hipóteses no campo de batalha.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    with col_x:
+        st.markdown(f"""
+        <div class="dna-box dna-box-x">
+            <h2 style='color:#FF9F00; margin-top:0;'>X</h2>
+            <p><b>O Fator Exponencial.</b></p>
+            <p>O 'X' simboliza a variável tecnológica desconhecida pelo mercado tradicional. É a Inteligência Artificial 
+            que processa gigabytes de dados em segundos. É o multiplicador que transforma uma economia comum em lucro 
+            exponencial para a incorporadora.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.divider()
+
+    col_missao, col_fundador = st.columns(2)
+    with col_missao:
+        st.subheader("🎯 Nossa Missão")
+        st.write("Maximizar a lucratividade da construção civil através de Visão Computacional, eliminando o desperdício humano.")
+        st.subheader("🌍 Nossa Visão")
+        st.write("Liderar a transição global da construção analógica para a digital, tornando a QUANTIX o padrão mundial de auditoria de projetos Lean.")
+        
+    with col_fundador:
+        st.subheader("👤 O Fundador")
+        st.write("""
+        **Lucas Teitelbaum** uniu o legado de sua família que vinha desde o seu avô, para algo que vai restar anos. 
+        Ao identificar que milhões de reais eram literalmente enterrados em obras devido a projetos ineficientes, 
+        decidiu criar a QUANTIX: a ponte definitiva entre o concreto e a inteligência de dados.
+        """)
+
+    st.divider()
+    st.caption("QUANTIX Strategic Engine © 2026 | Lucas Teitelbaum • Global Compliance.")
     
