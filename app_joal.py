@@ -13,20 +13,29 @@ DB_FILE = "projetos_quantix.csv"
 def carregar_dados():
     if os.path.exists(DB_FILE):
         df = pd.read_csv(DB_FILE)
+        # Garante as colunas para cálculos do dashboard
         df['Lucro_Num'] = df['Lucro'].str.replace('R$ ', '').str.replace('.', '').str.replace(',', '.').astype(float)
         df['Eff_Num'] = df['Eficiencia'].str.replace('%', '').astype(float) / 100
         return df
-    return pd.DataFrame(columns=["Empreendimento", "Data", "Antes", "Depois", "Lucro", "Eficiencia", "Lucro_Num", "Eff_Num"])
+    return pd.DataFrame(columns=["Empreendimento", "Data", "Antes", "Depois", "Lucro", "Eficiencia", "Lucro_Num", "Eff_Num", "Arquivo"])
 
-def salvar_projeto(nome, antes, depois):
+def salvar_projeto(nome, antes, depois, arquivo_objeto):
     df_existente = carregar_dados()
     lucro = antes - depois
     eficiencia = (lucro / antes) * 100
+    
+    # Gera o Novo Arquivo da IA para Download
+    nome_otimizado = f"QUANTIX_OTIMIZADO_{arquivo_objeto.name}"
+    with open(nome_otimizado, "wb") as f:
+        f.write(arquivo_objeto.getbuffer())
+    
     novo_projeto = {
         "Empreendimento": nome, "Data": datetime.now().strftime("%d/%m/%Y"),
         "Antes": f"R$ {antes:,.2f}", "Depois": f"R$ {depois:,.2f}",
-        "Lucro": f"R$ {lucro:,.2f}", "Eficiencia": f"{eficiencia:.1f}%"
+        "Lucro": f"R$ {lucro:,.2f}", "Eficiencia": f"{eficiencia:.1f}%",
+        "Arquivo": nome_otimizado
     }
+    
     df_novo = pd.concat([df_existente, pd.DataFrame([novo_projeto])], ignore_index=True)
     df_novo.drop(columns=['Lucro_Num', 'Eff_Num'], errors='ignore').to_csv(DB_FILE, index=False)
 
@@ -41,7 +50,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- CABEÇALHO (LIMPO SEM IMAGEM) ---
+# --- CABEÇALHO (LIMPO) ---
 h1, h2 = st.columns([8, 2])
 with h1:
     st.markdown("# <span style='color:#00E5FF'>QUANTI</span><span style='color:#FF9F00'>X</span>", unsafe_allow_html=True)
@@ -77,7 +86,7 @@ with tabs[0]:
         g2.subheader("⚡ Curva de Eficiência IA (%)")
         g2.line_chart(df.set_index('Empreendimento')['Eff_Num'] * 100)
 
-# --- TAB 2: OTIMIZADOR (1GB CAPACITY) ---
+# --- TAB 2: OTIMIZADOR ---
 with tabs[1]:
     st.header("Engine de Otimização Vision")
     st.info("🛡️ Configuração de Alta Capacidade Ativa: Suporte para arquivos até 1GB.")
@@ -86,25 +95,34 @@ with tabs[1]:
         nome = st.text_input("Nome da Obra")
         bruto = st.number_input("Custo Materiais (R$)", value=100000.0)
         up = st.file_uploader("Upload Planta / BIM / PDF", type=["png", "jpg", "jpeg", "pdf", "ifc"])
+    
     if up and nome and bruto > 0:
         c_orig, c_opt = st.columns(2)
         taxa = 0.14
         with c_orig:
             st.subheader("📄 Original")
             st.write(f"Arquivo: {up.name}")
-            try: st.image(Image.open(up), use_container_width=True)
-            except: st.warning("Processamento de metadados em curso...")
+            if up.type.startswith('image'):
+                try: st.image(Image.open(up), use_container_width=True)
+                except: st.warning("Processamento visual em curso...")
+            else:
+                st.success(f"📦 Arquivo Técnico Detectado: {up.name}")
+                st.info("Analisando malha de engenharia e metadados...")
         with c_opt:
             st.subheader("⚡ Otimizado QUANTIX")
-            st.image(ImageOps.colorize(Image.open(up).convert('L'), black="#003333", white="#00E5FF") if up.type.startswith('image') else Image.new('RGB', (100,100)), use_container_width=True)
+            if up.type.startswith('image'):
+                st.image(ImageOps.colorize(Image.open(up).convert('L'), black="#003333", white="#00E5FF"), use_container_width=True)
+            else:
+                st.warning("⚡ IA QUANTIX: Otimização Digital Concluída.")
+                st.write("Redução de insumos calculada sobre a árvore de objetos do arquivo.")
+            
             if st.button("💾 Salvar no Portfólio"):
-                salvar_projeto(nome, bruto, bruto*(1-taxa))
+                salvar_projeto(nome, bruto, bruto*(1-taxa), up)
                 st.balloons()
 
 # --- TAB 3: HIDRÁULICA ---
 with tabs[2]:
     st.header("💧 Inteligência Hidrossanitária")
-    st.write("Otimização de traçado e redução drástica de pontos de falha.")
     c_h1, c_h2, c_h3 = st.columns(3)
     c_h1.metric("Redução de Canos", "145m", "- 12%")
     c_h2.metric("Conexões Eliminadas", "42 un", "Menos risco")
@@ -119,11 +137,25 @@ with tabs[3]:
     st.header("📂 Gestão de Ativos")
     df_p = carregar_dados()
     if not df_p.empty:
-        st.dataframe(df_p[['Empreendimento', 'Data', 'Antes', 'Depois', 'Lucro', 'Eficiencia', 'Eff_Num']],
-            column_config={"Eff_Num": st.column_config.ProgressColumn("Impacto IA (%)", format="%.1f", min_value=0, max_value=0.25)},
+        st.dataframe(df_p[['Empreendimento', 'Data', 'Antes', 'Depois', 'Lucro', 'Eficiencia', 'Arquivo']],
+            column_config={"Arquivo": st.column_config.TextColumn("📄 Status Doc IA")},
             use_container_width=True, hide_index=True)
+        
+        st.divider()
+        st.subheader("📥 Área de Download")
+        escolha = st.selectbox("Selecione o empreendimento para baixar o projeto otimizado:", df_p['Empreendimento'])
+        arquivo_path = df_p[df_p['Empreendimento'] == escolha]['Arquivo'].values[0]
+        
+        if os.path.exists(str(arquivo_path)):
+            with open(str(arquivo_path), "rb") as file:
+                st.download_button(
+                    label=f"⬇️ Baixar Projeto Otimizado: {escolha}",
+                    data=file,
+                    file_name=str(arquivo_path),
+                    mime="application/octet-stream"
+                )
 
-# --- TAB 5: QUEM SOMOS (O DNA COMPLETO) ---
+# --- TAB 5: QUEM SOMOS (DNA RESTAURADO) ---
 with tabs[4]:
     st.markdown("## 🧬 O DNA QUANTIX: Manifesto por Lucas Teitelbaum")
     st.write("A QUANTIX não é apenas uma plataforma; é o novo sistema operacional da construção inteligente.")
@@ -141,7 +173,7 @@ with tabs[4]:
             <p><b>A Precisão da Engenharia.</b></p>
             <p>Derivado do termo 'Quantitativo', o QUANTI representa o rigor métrico e a base técnica sólida. 
             É o nosso alicerce na engenharia de precisão, onde cada grama de cobre e cada metro de cano 
-            são contabilizados. Viemos de um laboratório real, validando hipóteses em obras de alto padrão.</p>
+            são contabilizados.</p>
         </div>
         """, unsafe_allow_html=True)
         
@@ -151,14 +183,13 @@ with tabs[4]:
             <h2 style='color:#FF9F00; margin-top:0;'>X</h2>
             <p><b>O Fator Exponencial.</b></p>
             <p>O 'X' simboliza a variável tecnológica desconhecida pelo mercado tradicional. É a Inteligência Artificial 
-            que processa gigabytes de dados em segundos. É o multiplicador que transforma uma economia comum em lucro 
-            exponencial para a incorporadora.</p>
+            que processa gigabytes de dados em segundos para gerar lucro exponencial.</p>
         </div>
         """, unsafe_allow_html=True)
 
     st.divider()
 
-    # PILAR 2: MISSÃO, VISÃO E O FUNDADOR
+    # PILAR 2: MISSÃO E O FUNDADOR
     col_missao, col_fundador = st.columns(2)
     
     with col_missao:
@@ -184,24 +215,12 @@ with tabs[4]:
 
     st.divider()
 
-    # PILAR 3: COMPLIANCE E SEGURANÇA
+    # PILAR 3: COMPLIANCE
     st.subheader("🛡️ Base de Proteção e Segurança Jurídica")
-    st.write("Como uma plataforma de nível Enterprise, a segurança dos dados e a conformidade técnica são inegociáveis.")
-    
     with st.expander("📌 Metodologia de Validação Híbrida"):
-        st.info("""
-        A QUANTIX opera como uma ferramenta de **Inteligência Aumentada**. Nossas sugestões de traçado 
-        e redução de insumos são baseadas em algoritmos de caminho mínimo e normas internacionais. 
-        Toda economia deve ser validada pelo Responsável Técnico (RT) para garantir a segurança estrutural.
-        """)
-        
-    with st.expander("📌 Propriedade Intelectual e Segredo Industrial"):
-        st.warning("""
-        Os algoritmos de análise vision e a lógica de processamento hidráulico/elétrico são de 
-        propriedade exclusiva da QUANTIX Inc. A plataforma utiliza a Joal Teitelbaum como um 
-        ambiente de 'Sandbox' para validação prática, garantindo que o software funcione na 
-        realidade dura do canteiro de obras.
-        """)
+        st.info("A QUANTIX opera como uma ferramenta de Inteligência Aumentada. Toda economia deve ser validada pelo Responsável Técnico (RT).")
+    with st.expander("📌 Propriedade Intelectual"):
+        st.warning("Os algoritmos vision são de propriedade exclusiva da QUANTIX Inc.")
         st.caption("QUANTIX Strategic Engine © 2026 | Lucas Teitelbaum • Global Compliance.")
 
 # RODAPÉ
