@@ -429,15 +429,34 @@ def _norm_key(s: str) -> str:
 
 def extract_ifc_property_bag(file_bytes: bytes) -> Dict[str, Any]:
     """
-    Lê o IFC e retorna um 'bag' com:
-    - metadados de IfcProject/Building (Name, Description, LongName)
-    - propriedades de PropertySets (IfcPropertySingleValue, principalmente)
-    Chaves normalizadas (lower + underscore).
+    Extrator robusto:
+    - IfcProject / IfcBuilding (Name/LongName/Description)
+    - Psets ligados a elementos via IfcRelDefinesByProperties
+    - Quantities (IfcElementQuantity)
+    - Materiais via IfcRelAssociatesMaterial (+ props quando existirem)
+    - Também varre IfcPropertySet global como fallback
+    Retorna bag com chaves normalizadas.
     """
     bag: Dict[str, Any] = {}
     ifcopenshell = try_import_ifcopenshell()
     if ifcopenshell is None:
         return bag
+
+    def put(k: str, v: Any):
+        s = _to_str(v)
+        if s == "":
+            return
+        kn = _norm_key(k)
+        bag.setdefault(kn, s)
+
+    def put_pset(pset_name: str, prop_name: str, v: Any):
+        s = _to_str(v)
+        if s == "":
+            return
+        kstrong = f"pset_{_norm_key(pset_name)}__{_norm_key(prop_name)}"
+        bag[kstrong] = s
+        # chave fraca (só nome) - não sobrescreve se já existe
+        bag.setdefault(_norm_key(prop_name), s)
 
     try:
         import tempfile
@@ -446,59 +465,146 @@ def extract_ifc_property_bag(file_bytes: bytes) -> Dict[str, Any]:
             tf.flush()
             model = ifcopenshell.open(tf.name)
 
-        # --- IfcProject
+        # ----------------------------
+        # IfcProject / IfcBuilding
+        # ----------------------------
         try:
             prj = model.by_type("IfcProject")[0]
-            bag["ifc_project_name"] = _to_str(getattr(prj, "Name", ""))
-            bag["ifc_project_longname"] = _to_str(getattr(prj, "LongName", ""))
-            bag["ifc_project_description"] = _to_str(getattr(prj, "Description", ""))
+            put("ifc_project_name", getattr(prj, "Name", ""))
+            put("ifc_project_longname", getattr(prj, "LongName", ""))
+            put("ifc_project_description", getattr(prj, "Description", ""))
         except Exception:
             pass
 
-        # --- IfcBuilding (quando existir)
         try:
             bld = model.by_type("IfcBuilding")
             if bld:
                 b0 = bld[0]
-                bag["ifc_building_name"] = _to_str(getattr(b0, "Name", ""))
-                bag["ifc_building_longname"] = _to_str(getattr(b0, "LongName", ""))
-                bag["ifc_building_description"] = _to_str(getattr(b0, "Description", ""))
+                put("ifc_building_name", getattr(b0, "Name", ""))
+                put("ifc_building_longname", getattr(b0, "LongName", ""))
+                put("ifc_building_description", getattr(b0, "Description", ""))
         except Exception:
             pass
 
-        # --- Coleta de Psets via IfcPropertySet
+        # ----------------------------
+        # Função: extrair propriedades de IfcPropertySet / IfcElementQuantity
+        # ----------------------------
+        def read_prop(prop) -> Optional[Any]:
+            # IfcPropertySingleValue
+            try:
+                nv = getattr(prop, "NominalValue", None)
+                if nv is not None:
+                    return getattr(nv, "wrappedValue", nv)
+            except Exception:
+                pass
+            # IfcQuantity* (para Quantities)
+            for attr in ("LengthValue", "AreaValue", "VolumeValue", "CountValue", "WeightValue", "TimeValue"):
+                try:
+                    v = getattr(prop, attr, None)
+                    if v is not None:
+                        return getattr(v, "wrappedValue", v)
+                except Exception:
+                    pass
+            return None
+
+        def harvest_pset(definition):
+            # definition pode ser IfcPropertySet ou IfcElementQuantity
+            try:
+                dname = _to_str(getattr(definition, "Name", "")) or "Pset"
+            except Exception:
+                dname = "Pset"
+
+            # IfcPropertySet
+            if definition.is_a("IfcPropertySet"):
+                for prop in getattr(definition, "HasProperties", []) or []:
+                    pname = _to_str(getattr(prop, "Name", ""))
+                    if not pname:
+                        continue
+                    val = read_prop(prop)
+                    if val is None:
+                        continue
+                    put_pset(dname, pname, val)
+
+            # IfcElementQuantity
+            if definition.is_a("IfcElementQuantity"):
+                for q in getattr(definition, "Quantities", []) or []:
+                    qname = _to_str(getattr(q, "Name", ""))
+                    if not qname:
+                        continue
+                    val = read_prop(q)
+                    if val is None:
+                        continue
+                    put_pset(dname, qname, val)
+
+        # ----------------------------
+        # Psets ligados a elementos (o principal!)
+        # ----------------------------
+        try:
+            for rel in model.by_type("IfcRelDefinesByProperties"):
+                definition = getattr(rel, "RelatingPropertyDefinition", None)
+                if definition is None:
+                    continue
+                # lê os Psets/Quantities dessa definição
+                try:
+                    harvest_pset(definition)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+        # ----------------------------
+        # Materiais (muitos exportadores colocam classe/grade aqui)
+        # ----------------------------
+        try:
+            for rel in model.by_type("IfcRelAssociatesMaterial"):
+                mat = getattr(rel, "RelatingMaterial", None)
+                if mat is None:
+                    continue
+
+                # nome do material
+                try:
+                    mname = _to_str(getattr(mat, "Name", ""))
+                    if mname:
+                        put("material_name", mname)
+                        # também coloca como pseudo-pset
+                        put_pset("Material", "Name", mname)
+                except Exception:
+                    pass
+
+                # alguns IFCs têm IfcMaterialLayerSetUsage / IfcMaterialProfileSetUsage etc.
+                # tenta descer um nível e pegar Name também
+                try:
+                    for attr in ("ForLayerSet", "ForProfileSet", "Material", "LayerSet", "ProfileSet"):
+                        sub = getattr(mat, attr, None)
+                        if sub is None:
+                            continue
+                        subname = _to_str(getattr(sub, "Name", ""))
+                        if subname:
+                            put_pset("Material", f"{attr}_Name", subname)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # ----------------------------
+        # Fallback: varrer IfcPropertySet global (se existir)
+        # ----------------------------
         try:
             for pset in model.by_type("IfcPropertySet"):
-                pset_name = _to_str(getattr(pset, "Name", ""))
-                if not pset_name:
-                    continue
+                pset_name = _to_str(getattr(pset, "Name", "")) or "Pset"
                 for prop in getattr(pset, "HasProperties", []) or []:
                     pname = _to_str(getattr(prop, "Name", ""))
                     if not pname:
                         continue
-
-                    val = None
-                    try:
-                        nv = getattr(prop, "NominalValue", None)
-                        val = getattr(nv, "wrappedValue", nv)
-                    except Exception:
-                        val = None
-
-                    sval = _to_str(val)
-                    if sval == "":
+                    val = read_prop(prop)
+                    if val is None:
                         continue
-
-                    # chave forte: pset_<pset>__<prop>
-                    k = f"pset_{_norm_key(pset_name)}__{_norm_key(pname)}"
-                    bag[k] = sval
-
-                    # chave fraca: só nome da propriedade (primeiro ganha)
-                    k2 = _norm_key(pname)
-                    bag.setdefault(k2, sval)
+                    put_pset(pset_name, pname, val)
         except Exception:
             pass
 
         return bag
+
     except Exception:
         return {}
 
@@ -1117,6 +1223,7 @@ def render_props_form(disciplina: str, file_hash: str, key_prefix: str, prefill:
     # 1) saved (se já existe)
     # 2) prefill do IFC (se existe)
     # 3) vazio
+
     props = dict(saved) if saved else dict(prefill or {})
 
     fields = PRO_FIELDS.get(disciplina, [])
@@ -1124,6 +1231,9 @@ def render_props_form(disciplina: str, file_hash: str, key_prefix: str, prefill:
 
         if prefill and not saved:
             st.info("Auto-preenchido via IFC (IfcProject/Psets). Você pode revisar e salvar.")
+        with st.expander("🧪 DEBUG IFC → Props (ver o que o IFC trouxe)", expanded=False):
+            st.write("**Prefill (mapeado para o formulário):**")
+            st.json(prefill or {})    
 
         for f in fields:
             k = f["key"]
