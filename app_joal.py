@@ -924,30 +924,107 @@ with tabs[5]:
 
 # DNA
 with tabs[6]:
-    st.markdown("## 🧬 DNA QUANTIX")
-    st.write("Software de auditoria e otimização rastreável por #id no IFC — confiança construída com evidência.")
-    st.divider()
-    a,b = st.columns(2)
-    with a:
-        st.markdown(
-            """
-<div class="dna-box">
-  <h2 style='color:#00E5FF; margin-top:0;'>QUANTI</h2>
-  <p><b>Precisão e rastreabilidade.</b></p>
-  <p>Checagens automáticas + propriedades do projeto = análises contextualizadas e defendíveis.</p>
-</div>
-""",
-            unsafe_allow_html=True,
-        )
-    with b:
-        st.markdown(
-            """
-<div class="dna-box dna-box-x">
-  <h2 style='color:#FF9F00; margin-top:0;'>X</h2>
-  <p><b>Escala e consistência.</b></p>
-  <p>Automação que reduz retrabalho antes da obra — com registro de mudanças no IFC e relatório técnico.</p>
-</div>
-""",
-            unsafe_allow_html=True,
-        )
-    st.caption("QUANTIX © 2026 | Evidência • Rastreio por #id • Profissional")
+    st.markdown("""
+    <div class="dna-hero">
+      <div class="dna-kicker">IDENTIDADE • CONFIANÇA • EVIDÊNCIA</div>
+      <h1 class="dna-title"><span class="q">QUANTI</span><span class="x">X</span></h1>
+      <div class="dna-sub">
+        QUANTIX é um motor de auditoria e otimização de projetos BIM que transforma arquivos em
+        <b>decisões rastreáveis</b>. Cada ajuste vira evidência: relatório, registro por <b>#id</b> no IFC e um score de confiança que o cliente entende.
+      </div>
+      <div class="dna-badges">
+        <div class="dna-badge">Rastreio por #id</div>
+        <div class="dna-badge">Relatório técnico (PDF + JSON)</div>
+        <div class="dna-badge">Otimização aplicada no IFC</div>
+        <div class="dna-badge">Confiança 0–100</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("")
+
+    st.markdown("<div class='dna-grid'>", unsafe_allow_html=True)
+
+    st.markdown("""
+      <div class="dna-card">
+        <div class="topline">
+          <div class="dna-icon">📐</div>
+          <h3 class="dna-h" style="color:#00E5FF;">QUANTI — Precisão</h3>
+        </div>
+        <div class="dna-line"></div>
+        <p class="dna-p">
+          Métrica, padrão e rigor. A QUANTIX mede, valida e documenta as intervenções para reduzir retrabalho e elevar o nível técnico do projeto.
+        </p>
+        <p class="dna-p">
+          Resultado: <b>clareza</b> para o cliente, <b>controle</b> para o projetista e <b>previsibilidade</b> para a obra.
+        </p>
+      </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
+      <div class="dna-card">
+        <div class="topline">
+          <div class="dna-icon">⚡</div>
+          <h3 class="dna-h" style="color:#FF9F00;">X — Fator Exponencial</h3>
+        </div>
+        <div class="dna-line orange"></div>
+        <p class="dna-p">
+          Automação e inteligência aplicada. O “X” é o multiplicador que converte auditoria em ganho:
+          menos conflito, menos desperdício e decisões mais rápidas na etapa de projeto.
+        </p>
+        <p class="dna-p">
+          Resultado: <b>economia</b> + <b>qualidade</b> + <b>confiança</b> em escala.
+        </p>
+      </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("### Pilares do DNA")
+    st.markdown("<div class='dna-grid dna-pillars'>", unsafe_allow_html=True)
+
+    st.markdown("""
+      <div class="dna-card">
+        <div class="topline">
+          <div class="dna-icon">🛡️</div>
+          <h3 class="dna-h">Confiança</h3>
+        </div>
+        <p class="dna-p">
+          Um score 0–100 que cresce com propriedades do projeto + evidência no arquivo + registro de mudanças.
+        </p>
+      </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
+      <div class="dna-card">
+        <div class="topline">
+          <div class="dna-icon">🔎</div>
+          <h3 class="dna-h">Rastreabilidade</h3>
+        </div>
+        <p class="dna-p">
+          Cada intervenção pode ser auditada: <b>o quê</b>, <b>por quê</b> e <b>onde</b> (IFC <b>#id</b> + PropertySets QUANTIX).
+        </p>
+      </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
+      <div class="dna-card">
+        <div class="topline">
+          <div class="dna-icon">🏗️</div>
+          <h3 class="dna-h">Otimização</h3>
+        </div>
+        <p class="dna-p">
+          O IFC gerado não é “cópia”: ele sai com marcações e metadados aplicados para uso real no fluxo BIM.
+        </p>
+      </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class="dna-footer">
+      <b>QUANTIX Strategic Engine</b> — Auditoria digital com evidência, identidade e padrão.
+      <br/>
+      <span style="color:rgba(255,255,255,.65);">© 2026 | Lucas Teitelbaum • Global Compliance</span>
+    </div>
+    """, unsafe_allow_html=True)
