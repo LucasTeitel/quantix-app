@@ -927,11 +927,10 @@ with tabs[6]:
 
     st.markdown("""
     <style>
-
     .dna-wrap{
         display:flex;
         flex-direction:column;
-        gap:26px;
+        gap:18px;
     }
 
     .dna-core{
@@ -941,34 +940,43 @@ with tabs[6]:
         border:1px solid rgba(255,255,255,0.08);
     }
 
+    .dna-tag{
+        font-size:13px;
+        letter-spacing:3px;
+        opacity:0.6;
+        margin-bottom:14px;
+        text-transform: uppercase;
+    }
+
     .dna-core h1{
-        font-size:36px;
+        font-size:34px;
         font-weight:900;
         letter-spacing:2px;
-        margin-bottom:6px;
+        margin:0 0 6px 0;
     }
 
     .dna-core span.q{ color:#00E5FF; }
     .dna-core span.x{ color:#FF9F00; }
 
-    .dna-tag{
-        font-size:13px;
-        letter-spacing:3px;
-        opacity:0.6;
-        margin-bottom:18px;
+    .dna-sub{
+        opacity:0.78;
+        font-size:15px;
+        line-height:1.6;
+        max-width: 980px;
+        margin-top:10px;
     }
 
     .dna-grid{
-        display:grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap:18px;
+        display:flex;
+        flex-direction:column;
+        gap:16px;
     }
 
     .dna-node{
-        padding:24px;
+        padding:24px 26px;
         border-radius:18px;
         background: rgba(0,0,0,0.25);
-        border:1px solid rgba(255,255,255,0.1);
+        border:1px solid rgba(255,255,255,0.10);
         position:relative;
     }
 
@@ -986,93 +994,118 @@ with tabs[6]:
         font-size:18px;
         font-weight:900;
         letter-spacing:1px;
-        margin-bottom:10px;
+        margin:0 0 10px 0;
+        text-transform: uppercase;
     }
 
     .dna-node p{
         font-size:15px;
-        line-height:1.6;
-        opacity:0.85;
+        line-height:1.65;
+        opacity:0.86;
+        margin:0;
+        max-width: 1050px;
     }
 
-    .dna-line{
-        height:1px;
-        background:rgba(255,255,255,0.1);
-        margin:20px 0;
+    .dna-micro{
+        margin-top:10px;
+        font-size:13px;
+        opacity:0.6;
+        letter-spacing:2px;
+        text-transform: uppercase;
     }
 
     @media (max-width: 768px){
-        .dna-grid{
-            grid-template-columns: 1fr;
-        }
-        .dna-core h1{
-            font-size:28px;
-        }
+        .dna-core h1{ font-size:28px; }
+        .dna-node{ padding:20px; }
+        .dna-node p{ font-size:15px; }
     }
-
     </style>
     """, unsafe_allow_html=True)
 
-
     st.markdown('<div class="dna-wrap">', unsafe_allow_html=True)
 
-    # Core
+    # Cabeçalho
     st.markdown("""
     <div class="dna-core">
-        <div class="dna-tag">SYSTEM ARCHITECTURE</div>
-        <h1><span class="q">QUANTI</span><span class="x">X</span> ENGINE</h1>
-        <p style="opacity:0.75; font-size:15px;">
-            Evidência que vira economia.
-        </p>
+        <div class="dna-tag">ARQUITETURA DO SISTEMA</div>
+        <h1><span class="q">QUANTI</span><span class="x">X</span> STRATEGIC</h1>
+        <div class="dna-sub">
+            Um software que transforma projeto em evidência. A QUANTIX nasceu para resolver o que mais custa caro na construção:
+            o retrabalho silencioso, a incompatibilidade entre disciplinas e a falta de rastreio do porquê cada decisão foi tomada.
+        </div>
+        <div class="dna-sub" style="margin-top:10px;">
+            <b>Slogan:</b> Evidência que vira economia.
+        </div>
     </div>
     """, unsafe_allow_html=True)
 
-
-    # Grid Nodes
+    # Retângulos (mesmo design do print)
     st.markdown('<div class="dna-grid">', unsafe_allow_html=True)
 
     st.markdown("""
     <div class="dna-node blue">
-        <h3 style="color:#00E5FF;">QUANTI CORE</h3>
+        <h3 style="color:#00E5FF;">NÚCLEO QUANTI</h3>
         <p>
-            Núcleo métrico responsável por quantificação,
-            validação normativa e análise de consistência técnica.
+            Aqui vive a precisão. O QUANTI é o núcleo métrico que lê o modelo, organiza os quantitativos e valida consistência técnica.
+            É ele que reduz o “achismo” e transforma o projeto em algo mensurável: itens, padrões, coerência e previsibilidade.
+            Em vez de uma análise genérica, ele usa contexto e parâmetros para que o resultado seja defendível para cliente e projetista.
         </p>
+        <div class="dna-micro">Métrica • Padrão • Conformidade</div>
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown("""
     <div class="dna-node orange">
-        <h3 style="color:#FF9F00;">X ENGINE</h3>
+        <h3 style="color:#FF9F00;">NÚCLEO X</h3>
         <p>
-            Motor algorítmico de otimização e detecção
-            de interferências estruturais e sistêmicas.
+            Aqui vive o multiplicador. O X é o núcleo de otimização e compatibilização que busca reduzir desperdícios antes da obra acontecer.
+            Ele identifica redundâncias, sugere consolidações e registra intervenções com rastreio por elemento — para que cada ajuste tenha motivo,
+            evidência e retorno financeiro claro. Não é “um relatório bonito”: é um motor para margem e velocidade.
         </p>
+        <div class="dna-micro">Otimização • Compatibilização • Escala</div>
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown("""
     <div class="dna-node">
-        <h3>TRUST MATRIX</h3>
+        <h3>MATRIZ DE CONFIANÇA</h3>
         <p>
-            Score de confiança baseado em propriedades técnicas,
-            rastreabilidade IFC e evidência documental.
+            A confiança não é opinião: é cálculo. O score nasce da soma de evidências reais:
+            propriedades do projeto preenchidas (tensão, demanda, materiais, critérios), rastreabilidade por #id no IFC,
+            qualidade de consistência detectada e documentação gerada (PDF + JSON).
+            Quanto mais contexto e rastreio, mais a QUANTIX se torna “auditável” — e o cliente sente isso.
         </p>
+        <div class="dna-micro">Score 0–100 • Evidência • Transparência</div>
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown("""
     <div class="dna-node">
-        <h3>TRACE LAYER</h3>
+        <h3>CAMADA DE RASTREIO</h3>
         <p>
-            Registro por #id no IFC com PropertySets QUANTIX,
-            permitindo auditoria total das intervenções.
+            Cada intervenção precisa ter endereço. Por isso, a QUANTIX marca o IFC por #id e grava PropertySets para auditoria total.
+            Assim, o relatório consegue dizer: <b>o que foi ajustado</b>, <b>por que foi ajustado</b> e <b>onde está no IFC</b>.
+            Esse é o tipo de rastreio que transforma confiança “média” em confiança alta — porque o cliente consegue verificar.
         </p>
+        <div class="dna-micro">#id • PropertySets • Auditoria Total</div>
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown("</div>", unsafe_allow_html=True)
+    # NOVO retângulo de storytelling
+    st.markdown("""
+    <div class="dna-node">
+        <h3>NOSSA HISTÓRIA (POR QUE EXISTIMOS)</h3>
+        <p>
+            A QUANTIX não nasceu de uma ideia — nasceu de um problema real. Em obra, desperdício não aparece como “erro”, aparece como custo:
+            metros a mais de eletroduto, interferências descobertas tarde, decisões sem justificativa e retrabalho que ninguém quer assumir.
+            O que era invisível virou missão: criar um motor que antecipa falhas na etapa de projetos e devolve ao time algo que o mercado sempre pediu:
+            <b>segurança técnica com rastreio</b>. Quando a obra começa, a QUANTIX quer que o improviso já tenha sido eliminado.
+        </p>
+        <div class="dna-micro">Legado • Rigor • Construção Inteligente</div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)  # dna-grid
+    st.markdown("</div>", unsafe_allow_html=True)  # dna-wrap
 
-    st.caption("QUANTIX Strategic Engine | Architecture Layer View")
+    st.caption("QUANTIX Strategic Engine | Visão de Arquitetura • Evidência • Rastreabilidade")
