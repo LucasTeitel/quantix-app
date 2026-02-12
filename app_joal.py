@@ -1,10 +1,11 @@
-# quantix_professional.py
-# QUANTIX — Profissional (single-file)
+# app_joal.py  (CÓDIGO MESTRE - FIXADO)
+# QUANTIX — Profissional (single-file) com patch StreamlitValueBelowMinError
 # - Propriedades profissionais por disciplina (campos tipados)
 # - Confiança 0–100 (atingível) com breakdown
 # - IFC OTIMIZADO real (ifcopenshell): Pset + Description + rastreio por #id
 # - PDF com registro de mudanças (#id)
 # - JSON completo com change_log
+# - Patch definitivo para st.number_input respeitar min_value
 
 import re
 import json
@@ -59,6 +60,7 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 
 [data-testid="stMetricValue"] { color: var(--primary) !important; font-size: 34px !important; font-weight: 800 !important; }
 [data-testid="stMetric"] { background: var(--card); padding: 18px; border-radius: 12px; border: 1px solid #333; }
+
 .stButton>button { background: transparent !important; border: 1px solid var(--primary) !important; color: var(--primary) !important; border-radius: 10px; font-weight: 700; width:100%; }
 .stButton>button:hover { background: var(--primary) !important; color:#000 !important; }
 
@@ -108,13 +110,12 @@ def is_ifc(name: str) -> bool:
 # -----------------------------------------------------------------------------
 # PROPRIEDADES PROFISSIONAIS (tipadas)
 # -----------------------------------------------------------------------------
-# Cada disciplina tem campos com tipo e peso (para confiança).
-# type: "number" | "text" | "select"
-# weight: importância do campo (soma = 1.0 por disciplina idealmente)
 PRO_FIELDS = {
     "Eletrica": [
-        {"key":"tensao_sistema", "label":"Tensão do sistema", "type":"select", "options":["127/220", "220/380", "220 monofásico", "127 monofásico"], "weight":0.10},
-        {"key":"padrao_entrada", "label":"Padrão de entrada", "type":"select", "options":["Monofásico", "Bifásico", "Trifásico"], "weight":0.10},
+        {"key":"tensao_sistema", "label":"Tensão do sistema", "type":"select",
+         "options":["127/220", "220/380", "220 monofásico", "127 monofásico"], "weight":0.10},
+        {"key":"padrao_entrada", "label":"Padrão de entrada", "type":"select",
+         "options":["Monofásico", "Bifásico", "Trifásico"], "weight":0.10},
         {"key":"corrente_geral_a", "label":"Disjuntor geral (A)", "type":"number", "min":10.0, "max":1000.0, "weight":0.10},
         {"key":"demanda_kw", "label":"Demanda estimada (kW)", "type":"number", "min":0.5, "max":5000.0, "weight":0.12},
         {"key":"fator_demanda", "label":"Fator de demanda (0–1)", "type":"number", "min":0.1, "max":1.0, "weight":0.08},
@@ -125,26 +126,33 @@ PRO_FIELDS = {
         {"key":"observacoes", "label":"Observações do projeto", "type":"text", "weight":0.15},
     ],
     "Hidraulica": [
-        {"key":"sistema", "label":"Sistema", "type":"select", "options":["Água fria", "Água quente", "Água fria + quente", "Esgoto + ventilação"], "weight":0.10},
+        {"key":"sistema", "label":"Sistema", "type":"select",
+         "options":["Água fria", "Água quente", "Água fria + quente", "Esgoto + ventilação"], "weight":0.10},
         {"key":"pressao_mca", "label":"Pressão disponível (mca)", "type":"number", "min":1.0, "max":200.0, "weight":0.12},
         {"key":"altura_manometrica_m", "label":"Altura manométrica (m)", "type":"number", "min":0.0, "max":300.0, "weight":0.08},
         {"key":"vazao_lmin", "label":"Vazão de projeto (L/min)", "type":"number", "min":0.1, "max":5000.0, "weight":0.10},
         {"key":"reservatorio_l", "label":"Reservatório (L)", "type":"number", "min":0.0, "max":1e7, "weight":0.08},
-        {"key":"material_tubos", "label":"Material de tubulação", "type":"select", "options":["PVC", "PPR", "PEX", "Cobre", "Ferro galvanizado", "Outro"], "weight":0.10},
-        {"key":"criterio_perda_carga", "label":"Critério de perda de carga", "type":"select", "options":["Darcy-Weisbach", "Hazen-Williams", "Tabela fabricante"], "weight":0.10},
-        {"key":"tipo_esgoto", "label":"Tipo de esgoto", "type":"select", "options":["Primário", "Secundário", "Misto"], "weight":0.08},
+        {"key":"material_tubos", "label":"Material de tubulação", "type":"select",
+         "options":["PVC", "PPR", "PEX", "Cobre", "Ferro galvanizado", "Outro"], "weight":0.10},
+        {"key":"criterio_perda_carga", "label":"Critério de perda de carga", "type":"select",
+         "options":["Darcy-Weisbach", "Hazen-Williams", "Tabela fabricante"], "weight":0.10},
+        {"key":"tipo_esgoto", "label":"Tipo de esgoto", "type":"select",
+         "options":["Primário", "Secundário", "Misto"], "weight":0.08},
         {"key":"nrm_referencia", "label":"Norma/Referência (ex.: NBR 8160)", "type":"text", "weight":0.07},
         {"key":"observacoes", "label":"Observações do projeto", "type":"text", "weight":0.17},
     ],
     "Estrutural": [
-        {"key":"sistema_estrutural", "label":"Sistema estrutural", "type":"select", "options":["Concreto armado", "Metálica", "Mista", "Pré-moldado"], "weight":0.08},
+        {"key":"sistema_estrutural", "label":"Sistema estrutural", "type":"select",
+         "options":["Concreto armado", "Metálica", "Mista", "Pré-moldado"], "weight":0.08},
         {"key":"fck_mpa", "label":"fck (MPa)", "type":"number", "min":10.0, "max":100.0, "weight":0.12},
-        {"key":"aco_classe", "label":"Classe do aço", "type":"select", "options":["CA-50", "CA-60", "ASTM A572", "ASTM A36", "Outro"], "weight":0.08},
+        {"key":"aco_classe", "label":"Classe do aço", "type":"select",
+         "options":["CA-50", "CA-60", "ASTM A572", "ASTM A36", "Outro"], "weight":0.08},
         {"key":"cargas_kn", "label":"Cargas principais (kN) (resumo)", "type":"text", "weight":0.10},
         {"key":"vento_categoria", "label":"Vento (categoria/região)", "type":"text", "weight":0.06},
         {"key":"solo_spt", "label":"Solo / SPT (resumo)", "type":"text", "weight":0.12},
         {"key":"cobrimento_mm", "label":"Cobrimento (mm)", "type":"number", "min":5.0, "max":100.0, "weight":0.08},
-        {"key":"classe_agressividade", "label":"Classe de agressividade", "type":"select", "options":["I", "II", "III", "IV"], "weight":0.06},
+        {"key":"classe_agressividade", "label":"Classe de agressividade", "type":"select",
+         "options":["I", "II", "III", "IV"], "weight":0.06},
         {"key":"criterio_flecha", "label":"Critério de flecha/serviço", "type":"text", "weight":0.08},
         {"key":"nrm_referencia", "label":"Norma/Referência (ex.: NBR 6118/15575)", "type":"text", "weight":0.07},
         {"key":"observacoes", "label":"Observações do projeto", "type":"text", "weight":0.15},
@@ -228,6 +236,7 @@ def salvar_db(df: pd.DataFrame) -> None:
 # -----------------------------------------------------------------------------
 def processar_mapa(conteudo: str, mapa: Dict[str, Dict[str, str]], seed: int) -> Dict[str, Dict[str, Any]]:
     digest = hashlib.sha256(str(seed).encode("utf-8")).digest()
+
     def det_uniform(a: float, b: float, i: int) -> float:
         x = digest[i % len(digest)] / 255.0
         return a + (b - a) * x
@@ -238,7 +247,7 @@ def processar_mapa(conteudo: str, mapa: Dict[str, Dict[str, str]], seed: int) ->
         count = len(re.findall(rf"={re.escape(classe)}\(", conteudo))
         if count > 0:
             found = True
-            fator = det_uniform(0.84, 0.96, idx)  # mais “profissional”: menos agressivo
+            fator = det_uniform(0.84, 0.96, idx)
             qtd = int(count * fator)
             resultados[classe] = {
                 "nome": info["nome"],
@@ -253,28 +262,28 @@ def processar_mapa(conteudo: str, mapa: Dict[str, Dict[str, str]], seed: int) ->
             "antes": 100,
             "depois": 95,
             "defeito": "Modelo sem classes esperadas (ou IFC exportado incompleto)",
-            "ciencia": "Sem entidades-alvo: recomenda-se revisão do export/discipline mapping.",
+            "ciencia": "Revisar export IFC e mapping por disciplina.",
         }
     return resultados
 
 def extrair_eletrica(file_bytes: bytes, seed: int) -> Dict[str, Any]:
     txt = decode_ifc_text(file_bytes)
     mapa = {
-        "IFCCABLESEGMENT": {"nome":"Cabos (segmentos)", "defeito":"Roteamento redundante", "ciencia":"Heurística de grafo + consolidação de trajetos"},
-        "IFCFLOWTERMINAL": {"nome":"Pontos (tomadas/terminais)", "defeito":"Distribuição de circuitos", "ciencia":"Balanceamento por demanda e criticidade"},
+        "IFCCABLESEGMENT": {"nome":"Cabos (segmentos)", "defeito":"Roteamento redundante", "ciencia":"Heurística de grafo + consolidação"},
+        "IFCFLOWTERMINAL": {"nome":"Pontos (tomadas/terminais)", "defeito":"Distribuição de circuitos", "ciencia":"Balanceamento por demanda"},
         "IFCJUNCTIONBOX": {"nome":"Caixas de passagem", "defeito":"Excesso de nós", "ciencia":"Redução de pontos e melhoria de manutenção"},
         "IFCFLOWSEGMENT": {"nome":"Eletrodutos", "defeito":"Conflitos em trajeto", "ciencia":"Compatibilização e redução de interferências"},
-        "IFCDISTRIBUTIONELEMENT": {"nome":"Quadros", "defeito":"Dimensionamento/organização", "ciencia":"Critérios de agrupamento e reserva técnica"},
+        "IFCDISTRIBUTIONELEMENT": {"nome":"Quadros", "defeito":"Dimensionamento/organização", "ciencia":"Agrupamento e reserva técnica"},
     }
     return processar_mapa(txt, mapa, seed)
 
 def extrair_hidraulica(file_bytes: bytes, seed: int) -> Dict[str, Any]:
     txt = decode_ifc_text(file_bytes)
     mapa = {
-        "IFCPIPESEGMENT": {"nome":"Tubos (segmentos)", "defeito":"Trajeto longo/perda de carga", "ciencia":"Otimização de traçado + redução de comprimento"},
-        "IFCPIPEFITTING": {"nome":"Conexões", "defeito":"Perdas localizadas altas", "ciencia":"Redução de conexões e escolha de curvas adequadas"},
+        "IFCPIPESEGMENT": {"nome":"Tubos (segmentos)", "defeito":"Trajeto longo/perda de carga", "ciencia":"Otimização de traçado"},
+        "IFCPIPEFITTING": {"nome":"Conexões", "defeito":"Perdas localizadas altas", "ciencia":"Redução de conexões"},
         "IFCFLOWCONTROLLER": {"nome":"Registros/Válvulas", "defeito":"Acessibilidade", "ciencia":"Reposicionamento para manutenção"},
-        "IFCWASTETERMINAL": {"nome":"Pontos de esgoto", "defeito":"Risco de ventilação insuficiente", "ciencia":"Revisão de ventilação e declividade"},
+        "IFCWASTETERMINAL": {"nome":"Pontos de esgoto", "defeito":"Ventilação insuficiente", "ciencia":"Revisão de ventilação/declividade"},
         "IFCSANITARYTERMINAL": {"nome":"Aparelhos sanitários", "defeito":"Compatibilização hidráulica", "ciencia":"Checagem de alimentação e descarga"},
     }
     return processar_mapa(txt, mapa, seed)
@@ -286,11 +295,11 @@ def extrair_estrutural(file_bytes: bytes, seed: int) -> Dict[str, Any]:
         "IFCFOOTING": {"nome":"Fundações", "antes": 40 + (s % 8), "depois": 40 + (s % 8),
                       "defeito":"Checagem exige sondagem/cargas", "ciencia":"Validar SPT x cargas nodais (dados reais)."},
         "IFCBEAM_COLUMN": {"nome":"Vigas/Pilares", "antes": 900 + s, "depois": 860 + s,
-                           "defeito":"Consumo potencialmente otimável", "ciencia":"Otimização depende de seções/cargas."},
+                           "defeito":"Consumo potencialmente otimável", "ciencia":"Depende de seções/cargas."},
         "IFC_CLASH": {"nome":"Clash estrutura x MEP/arquitetura", "antes": 15 + (s % 4), "depois": 0,
                       "defeito":"Interferência geométrica", "ciencia":"Coordenação de modelos e ajustes."},
         "IFCSLAB": {"nome":"Lajes", "antes": 30, "depois": 30,
-                    "defeito":"Desempenho acústico depende de parâmetros", "ciencia":"Necessário especificar camadas/massa."},
+                    "defeito":"Acústica depende de parâmetros", "ciencia":"Necessário especificar camadas/massa."},
     }
 
 @st.cache_data(show_spinner=False)
@@ -348,29 +357,23 @@ def confidence_0_100(
     optimization_applied: bool
 ) -> Tuple[int, str, Dict[str,int]]:
     # Componentes (somam 100):
-    # - IFC qualidade: 0..40
-    # - Propriedades: 0..40
-    # - Rastreabilidade (#ids encontrados): 0..10
-    # - Otimização aplicada (gravou IFC otimizado): 0..10
+    # - IFC: 0..40
+    # - Props: 0..40
+    # - IDs: 0..10
+    # - Otim aplicado: 0..10
 
-    # 1) IFC qualidade
     if not dados_ifc:
         ifc_pts = 5
     elif "GENERIC" in dados_ifc and len(dados_ifc) == 1:
         ifc_pts = 15
     else:
-        # mais classes detectadas -> mais confiança, teto 40
         n = len(dados_ifc)
-        ifc_pts = min(40, 20 + n * 5)  # 4 classes -> 40
+        ifc_pts = min(40, 20 + n * 5)
 
-    # 2) Propriedades (peso)
-    pc = props_score_weighted(props, disciplina)  # 0..1
+    pc = props_score_weighted(props, disciplina)
     props_pts = int(round(pc * 40))
 
-    # 3) IDs
     ids_pts = 10 if has_ids else 0
-
-    # 4) Otimização aplicada
     opt_pts = 10 if optimization_applied else 0
 
     total = max(0, min(100, ifc_pts + props_pts + ids_pts + opt_pts))
@@ -399,23 +402,20 @@ def apply_optimizations_ifc(
 ) -> Tuple[bool, str]:
     ifcopenshell = try_import_ifcopenshell()
     if ifcopenshell is None:
-        return False, "ifcopenshell não instalado (pip install ifcopenshell)."
+        return False, "ifcopenshell não instalado no servidor (pip install ifcopenshell)."
 
     try:
         model = ifcopenshell.open(str(ifc_in_path))
         import ifcopenshell.api  # type: ignore
 
-        # carimbo no projeto
         try:
             proj = model.by_type("IfcProject")[0]
             proj.Description = (proj.Description or "") + f" | QUANTIX OTIMIZADO {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         except Exception:
             pass
 
-        # resumo props
         compact = "; ".join([f"{k}={v}" for k, v in props.items() if str(v).strip()][:12])[:250]
 
-        # aplica por entidade
         for ch in change_log:
             try:
                 eid_num = int(str(ch["ifc_id"]).replace("#", ""))
@@ -436,17 +436,15 @@ def apply_optimizations_ifc(
                     "Timestamp": now_iso(),
                 })
 
-                # marca visual
                 try:
                     ent.Description = (ent.Description or "") + f" | QUANTIX:{ch['ifc_id']}"
                 except Exception:
                     pass
-
             except Exception:
                 continue
 
         model.write(str(ifc_out_path))
-        return True, "IFC OTIMIZADO gerado com sucesso (Pset_QuantixOptimization aplicado)."
+        return True, "IFC OTIMIZADO gerado (Pset_QuantixOptimization aplicado)."
     except Exception as e:
         return False, f"Falha ao escrever IFC: {e}"
 
@@ -499,7 +497,6 @@ def gerar_pdf(
         pdf.cell(0, 8, f"Evidência: {evid_path.name}", 1, 1, "L", fill=True)
     pdf.ln(4)
 
-    # Contexto
     pdf.set_font("Arial", "B", 12)
     pdf.cell(0, 8, "1) Contexto informado (propriedades)", ln=True)
     pdf.set_font("Arial", "", 9)
@@ -511,7 +508,6 @@ def gerar_pdf(
         pdf.multi_cell(0, 5, "Não informado.")
     pdf.ln(2)
 
-    # Indicadores
     pdf.set_font("Arial", "B", 12)
     pdf.cell(0, 8, "2) Indicadores", ln=True)
     pdf.set_font("Arial", "", 10)
@@ -520,7 +516,6 @@ def gerar_pdf(
     pdf.multi_cell(0, 5, f"Breakdown confiança: IFC={breakdown['IFC']} | Props={breakdown['Props']} | IDs={breakdown['IDs']} | Otim={breakdown['Otim']}")
 
     pdf.ln(2)
-    # Diagnóstico
     pdf.set_font("Arial", "B", 12)
     pdf.cell(0, 8, "3) Diagnóstico resumido", ln=True)
 
@@ -539,11 +534,10 @@ def gerar_pdf(
         pdf.cell(62, 7, str(info.get("defeito",""))[:34], 1, 1, "L")
 
     pdf.ln(4)
-    # Registro de mudanças
     pdf.set_font("Arial", "B", 12)
     pdf.cell(0, 8, "4) Registro de mudanças aplicadas no IFC (por #id)", ln=True)
     pdf.set_font("Arial", "", 9)
-    pdf.multi_cell(0, 5, "A tabela abaixo lista itens marcados no IFC OTIMIZADO via PropertySet (rastreável).")
+    pdf.multi_cell(0, 5, "Lista de itens marcados no IFC OTIMIZADO via PropertySet (rastreável).")
 
     pdf.set_font("Arial", "B", 8)
     pdf.set_fill_color(230)
@@ -565,7 +559,7 @@ def gerar_pdf(
     pdf.ln(6)
     pdf.set_font("Arial", "I", 9)
     pdf.multi_cell(0, 5, "Obs.: Nesta versão, a otimização altera o IFC com metadados rastreáveis (Pset/Description). "
-                         "Substituições físicas (tipo/material/geometria) podem ser adicionadas por regras específicas do seu padrão BIM.")
+                         "Substituições físicas (tipo/material/geometria) podem ser adicionadas por regras específicas do padrão BIM.")
 
     out = ARTIFACTS_DIR / f"RELATORIO_{safe_filename(disciplina)}_{safe_filename(empreendimento)}_{file_hash[:8]}.pdf"
     pdf.output(str(out))
@@ -652,7 +646,7 @@ def salvar_projeto(empreendimento: str, disciplina: str, uploaded_file, props: d
         ifc_original_path.write_bytes(file_bytes)
 
         with st.spinner(f"Processando IFC ({disciplina})..."):
-            time.sleep(0.3)
+            time.sleep(0.2)
             dados_ifc = analisar_ifc(disciplina, file_bytes, file_hash)
 
         ifc_text = decode_ifc_text(file_bytes)
@@ -666,28 +660,22 @@ def salvar_projeto(empreendimento: str, disciplina: str, uploaded_file, props: d
             optimization_applied = True
             st.success(msg)
         else:
-            st.error(msg)
-            # fallback: mantém original como "otimizado", mas sem pontos de otimização aplicada
-            ifc_otimizado_path = ifc_original_path
+            st.warning(msg)
+            ifc_otimizado_path = ifc_original_path  # fallback: não quebra o app
 
-    # confiança e métricas
     metrics = calcular_metricas(dados_ifc)
     conf = confidence_0_100(dados_ifc, props, disciplina, has_ids=has_ids, optimization_applied=optimization_applied)
 
-    # salva props (sempre)
     ppath = props_path(file_hash, disciplina)
     save_props(file_hash, disciplina, props)
 
-    # JSON
     file_meta = {"nome_original": original_name, "hash_sha256": file_hash, "tipo": "PDF" if is_pdf(original_name) else "IFC", "tamanho_bytes": len(file_bytes)}
     obj = gerar_json(empreendimento, disciplina, file_meta, props, dados_ifc, change_log, metrics, conf)
     rec_path = proj_dir / f"RECOMENDACOES_{safe_filename(disciplina)}_{safe_filename(empreendimento)}_{file_hash[:8]}.json"
     rec_path.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    # PDF
     pdf_path = gerar_pdf(empreendimento, disciplina, original_name, file_hash, props, dados_ifc, change_log, metrics, conf, evid_path)
 
-    # Persist
     df = carregar_dados()
     t_antes, t_depois, econ, eff = metrics
     conf_score, conf_label, _breakdown = conf
@@ -764,6 +752,9 @@ with tabs[0]:
         show["Eficiencia_%"] = (show["Eficiencia_Num"]*100).round(1).astype(str)+"%"
         st.dataframe(show[["Empreendimento","Disciplina","DataBR","Economia_Itens","Eficiencia_%","Confianca","Confianca_Score","Arquivo_Original"]], use_container_width=True)
 
+# -----------------------------------------------------------------------------
+# PATCH DEFINITIVO AQUI: render_props_form (number_input nunca abaixo do min)
+# -----------------------------------------------------------------------------
 def render_props_form(disciplina: str, file_hash: str, key_prefix: str) -> dict:
     saved = load_props(file_hash, disciplina)
     props = dict(saved)
@@ -777,20 +768,40 @@ def render_props_form(disciplina: str, file_hash: str, key_prefix: str) -> dict:
             sk = f"{key_prefix}_{k}"
 
             if typ == "number":
+                # ---- PATCH: value sempre >= min_value e <= max_value
+                minv = float(f.get("min", -1e18))
+                maxv = float(f.get("max",  1e18))
+
                 v0 = props.get(k)
                 try:
-                    v0 = float(v0) if v0 not in (None,"") else None
+                    v0 = float(v0)
                 except Exception:
                     v0 = None
-                props[k] = st.number_input(label, value=(v0 if v0 is not None else 0.0),
-                                           min_value=float(f.get("min", -1e18)), max_value=float(f.get("max", 1e18)),
-                                           key=sk)
-                # não salva 0.0 “sem querer” se usuário não mexeu: mantém mas ok
+
+                # se não tem valor, inicia no mínimo
+                if v0 is None:
+                    v0 = minv
+
+                # clamp
+                if v0 < minv:
+                    v0 = minv
+                if v0 > maxv:
+                    v0 = maxv
+
+                props[k] = st.number_input(
+                    label,
+                    value=v0,
+                    min_value=minv,
+                    max_value=maxv,
+                    key=sk
+                )
+
             elif typ == "select":
                 opts = f.get("options", [])
                 cur = props.get(k)
                 idx = opts.index(cur) if (cur in opts) else 0
                 props[k] = st.selectbox(label, opts, index=idx, key=sk)
+
             else:
                 props[k] = st.text_input(label, value=str(props.get(k,"") or ""), key=sk)
 
@@ -851,10 +862,10 @@ with tabs[1]:
                 "Gera IFC OTIMIZADO com rastreio por #id e PropertySets QUANTIX + relatório profissional.")
 with tabs[2]:
     upload_form("Engine H2O (Hidráulica) — Profissional", "Hidraulica", "hidraulica",
-                "Gera IFC OTIMIZADO com rastreio por #id e evidência técnica (PDF/JSON).")
+                "Gera IFC OTIMIZADO com rastreio por #id + evidência técnica.")
 with tabs[3]:
     upload_form("Engine Structural (Estrutural) — Profissional", "Estrutural", "estrutural",
-                "Gera IFC OTIMIZADO com marcações rastreáveis; próximo passo é regra por propriedades reais do modelo.")
+                "Gera IFC OTIMIZADO com marcações rastreáveis; próximo passo: regras por propriedades reais.")
 
 # Portfólio
 with tabs[4]:
