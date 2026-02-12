@@ -1,4 +1,4 @@
-fpdf
-streamlit
-pandas
-Pillow
+streamlit>=1.33
+pandas>=2.0
+fpdf>=1.7.2
+ifcopenshell
