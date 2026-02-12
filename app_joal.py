@@ -924,129 +924,155 @@ with tabs[5]:
 
 # DNA
 with tabs[6]:
-    slogan = "Evidência que vira economia."
+
+    st.markdown("""
+    <style>
+
+    .dna-wrap{
+        display:flex;
+        flex-direction:column;
+        gap:26px;
+    }
+
+    .dna-core{
+        padding:32px;
+        border-radius:22px;
+        background: rgba(255,255,255,0.02);
+        border:1px solid rgba(255,255,255,0.08);
+    }
+
+    .dna-core h1{
+        font-size:36px;
+        font-weight:900;
+        letter-spacing:2px;
+        margin-bottom:6px;
+    }
+
+    .dna-core span.q{ color:#00E5FF; }
+    .dna-core span.x{ color:#FF9F00; }
+
+    .dna-tag{
+        font-size:13px;
+        letter-spacing:3px;
+        opacity:0.6;
+        margin-bottom:18px;
+    }
+
+    .dna-grid{
+        display:grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap:18px;
+    }
+
+    .dna-node{
+        padding:24px;
+        border-radius:18px;
+        background: rgba(0,0,0,0.25);
+        border:1px solid rgba(255,255,255,0.1);
+        position:relative;
+    }
+
+    .dna-node.blue{
+        border:1px solid #00E5FF;
+        box-shadow: 0 0 14px rgba(0,229,255,0.12);
+    }
+
+    .dna-node.orange{
+        border:1px solid #FF9F00;
+        box-shadow: 0 0 14px rgba(255,159,0,0.12);
+    }
+
+    .dna-node h3{
+        font-size:18px;
+        font-weight:900;
+        letter-spacing:1px;
+        margin-bottom:10px;
+    }
+
+    .dna-node p{
+        font-size:15px;
+        line-height:1.6;
+        opacity:0.85;
+    }
+
+    .dna-line{
+        height:1px;
+        background:rgba(255,255,255,0.1);
+        margin:20px 0;
+    }
+
+    @media (max-width: 768px){
+        .dna-grid{
+            grid-template-columns: 1fr;
+        }
+        .dna-core h1{
+            font-size:28px;
+        }
+    }
+
+    </style>
+    """, unsafe_allow_html=True)
+
 
     st.markdown('<div class="dna-wrap">', unsafe_allow_html=True)
 
-    st.markdown(f"""
-    <div class="dna-hero2">
-      <div class="dna-hero-inner">
-        <div class="dna-kicker2">IDENTIDADE • CONFIANÇA • RASTREABILIDADE</div>
-        <h1 class="dna-title2"><span class="q">QUANTI</span><span class="x">X</span></h1>
-        <div class="dna-slogan">{slogan}</div>
-        <div class="dna-sub2">
-          A QUANTIX é um motor de auditoria BIM que transforma arquivos em <b>decisões defendíveis</b>.
-          Cada otimização vira registro: <b>PDF</b>, <b>JSON</b> e marcação no <b>IFC por #id</b> — para o cliente confiar sem “achismo”.
-        </div>
-        <div class="dna-chips">
-          <div class="dna-chip">#id + PropertySets</div>
-          <div class="dna-chip">Relatório profissional</div>
-          <div class="dna-chip">Confiança 0–100</div>
-          <div class="dna-chip">Pronto para BIM</div>
-        </div>
-      </div>
+    # Core
+    st.markdown("""
+    <div class="dna-core">
+        <div class="dna-tag">SYSTEM ARCHITECTURE</div>
+        <h1><span class="q">QUANTI</span><span class="x">X</span> ENGINE</h1>
+        <p style="opacity:0.75; font-size:15px;">
+            Evidência que vira economia.
+        </p>
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown('<div class="dna-grid2">', unsafe_allow_html=True)
 
-    # QUANTI / X
+    # Grid Nodes
+    st.markdown('<div class="dna-grid">', unsafe_allow_html=True)
+
     st.markdown("""
-      <div class="dna-card2">
-        <div class="dna-row">
-          <h3 class="dna-h2" style="color:#00E5FF;">QUANTI — Precisão</h3>
-          <div style="opacity:.9;">📐</div>
-        </div>
-        <p class="dna-p2">
-          Métrica, padrão e rigor. A QUANTIX mede, valida e documenta as intervenções para reduzir retrabalho
-          e elevar o nível técnico do projeto.
+    <div class="dna-node blue">
+        <h3 style="color:#00E5FF;">QUANTI CORE</h3>
+        <p>
+            Núcleo métrico responsável por quantificação,
+            validação normativa e análise de consistência técnica.
         </p>
-      </div>
-      <div class="dna-card2">
-        <div class="dna-row">
-          <h3 class="dna-h2" style="color:#FF9F00;">X — Fator Exponencial</h3>
-          <div style="opacity:.9;">⚡</div>
-        </div>
-        <p class="dna-p2">
-          Automação e inteligência aplicada. O “X” é o multiplicador que converte auditoria em ganho:
-          menos conflito, menos desperdício e decisão mais rápida antes da obra.
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class="dna-node orange">
+        <h3 style="color:#FF9F00;">X ENGINE</h3>
+        <p>
+            Motor algorítmico de otimização e detecção
+            de interferências estruturais e sistêmicas.
         </p>
-      </div>
+    </div>
     """, unsafe_allow_html=True)
 
-    # Métricas de percepção (marketing + produto)
     st.markdown("""
-      <div class="dna-card2 small">
-        <div class="dna-row">
-          <h3 class="dna-h2">Confiança</h3>
-          <div class="dna-metric"><span>0–100</span></div>
-        </div>
-        <p class="dna-p2">Aumenta com propriedades do projeto, rastreio no IFC e evidência gerada.</p>
-      </div>
-      <div class="dna-card2 small">
-        <div class="dna-row">
-          <h3 class="dna-h2">Rastreio</h3>
-          <div class="dna-metric"><span>#id</span></div>
-        </div>
-        <p class="dna-p2">Cada item otimizado é referenciável: o quê, por quê e onde no modelo.</p>
-      </div>
-      <div class="dna-card2 small">
-        <div class="dna-row">
-          <h3 class="dna-h2">Velocidade</h3>
-          <div class="dna-metric"><span>minutos</span></div>
-        </div>
-        <p class="dna-p2">Reduz ciclos de compatibilização e acelera a tomada de decisão.</p>
-      </div>
+    <div class="dna-node">
+        <h3>TRUST MATRIX</h3>
+        <p>
+            Score de confiança baseado em propriedades técnicas,
+            rastreabilidade IFC e evidência documental.
+        </p>
+    </div>
     """, unsafe_allow_html=True)
 
-    # Como funciona
     st.markdown("""
-      <div class="dna-card2 full">
-        <div class="dna-row">
-          <h3 class="dna-h2">Como a QUANTIX entrega confiança</h3>
-          <div style="opacity:.9;">🔎</div>
-        </div>
-
-        <div class="dna-step">
-          <div class="n">1</div>
-          <div>
-            <p class="t">Contexto do projeto</p>
-            <p class="d">Você informa propriedades (tensão, demanda, SPT, pressão, etc.). Isso elimina análise genérica.</p>
-          </div>
-        </div>
-
-        <div class="dna-step">
-          <div class="n">2</div>
-          <div>
-            <p class="t">Auditoria e otimização</p>
-            <p class="d">O motor identifica pontos críticos e aplica marcações rastreáveis no IFC (PropertySets + #id).</p>
-          </div>
-        </div>
-
-        <div class="dna-step">
-          <div class="n">3</div>
-          <div>
-            <p class="t">Evidência para o cliente</p>
-            <p class="d">Gera relatório (PDF) e registro técnico (JSON) com justificativa, motivo e referência do item alterado.</p>
-          </div>
-        </div>
-      </div>
+    <div class="dna-node">
+        <h3>TRACE LAYER</h3>
+        <p>
+            Registro por #id no IFC com PropertySets QUANTIX,
+            permitindo auditoria total das intervenções.
+        </p>
+    </div>
     """, unsafe_allow_html=True)
 
-    st.markdown("</div>", unsafe_allow_html=True)  # dna-grid2
-
-    # CTA
-    st.markdown("""
-      <div class="dna-cta">
-        <div>
-          <strong>Pronto para elevar sua credibilidade?</strong><br/>
-          <span>Envie um IFC e gere evidência rastreável em minutos.</span>
-        </div>
-        <div style="border:1px solid rgba(0,229,255,.35); padding:10px 12px; border-radius:14px; color:#00E5FF; font-weight:900;">
-          QUANTIX • Strategic Engine
-        </div>
-      </div>
-    """, unsafe_allow_html=True)
-
-    st.caption("QUANTIX © 2026 | Evidência • Rastreio por #id • Profissional")
     st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.caption("QUANTIX Strategic Engine | Architecture Layer View")
