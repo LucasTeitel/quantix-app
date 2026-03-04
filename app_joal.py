@@ -1,17 +1,19 @@
 # app_joal.py  (CÓDIGO MESTRE - FIXADO)
-# QUANTIX — Profissional (single-file) com patch StreamlitValueBelowMinError
-# - Propriedades profissionais por disciplina (campos tipados)
-# - Confiança 0–100 (atingível) com breakdown
-# - IFC OTIMIZADO real (ifcopenshell): Pset + Description + rastreio por #id
-# - PDF com registro de mudanças (#id)
-# - JSON completo com change_log
-# - Patch definitivo para st.number_input respeitar min_value
+# QUANTIX — Profissional (single-file) pronto para MVP multiusuário
+# - Multi-tenant (tenant_id) + user_id (login simples no sidebar)
+# - Project ID único (uuid4) e isolamento de artefatos por tenant/project
+# - Banco transacional SQLite (no lugar do CSV)
+# - PDF Doc ID fixo por documento (não muda a cada página)
+# - Pset dedup (evita duplicar Pset_QuantixOptimization ao reprocessar)
+# - Mantém: propriedades tipadas, confiança 0–100, IFC otimizado (Pset/Description), PDF, JSON change_log
 
 import re
 import json
 import time
+import uuid
 import hashlib
 import logging
+import sqlite3
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional, Tuple, List
@@ -26,6 +28,8 @@ from fpdf import FPDF
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s - %(message)s")
 logger = logging.getLogger("quantix")
 
+ENGINE_VERSION = "2026.03.04-multiuser-mvp"
+
 # -----------------------------------------------------------------------------
 # STREAMLIT
 # -----------------------------------------------------------------------------
@@ -33,20 +37,14 @@ st.set_page_config(
     page_title="QUANTIX | Professional Engine",
     layout="wide",
     page_icon="🌐",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 APP_ROOT = Path(".").resolve()
 DATA_DIR = APP_ROOT / "quantix_data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-ARTIFACTS_DIR = DATA_DIR / "artefatos"
-ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
-
-PROPS_DIR = DATA_DIR / "propriedades"
-PROPS_DIR.mkdir(parents=True, exist_ok=True)
-
-DB_FILE = DATA_DIR / "projetos_quantix.csv"
+DB_PATH = DATA_DIR / "quantix.db"
 
 # -----------------------------------------------------------------------------
 # CSS + Mobile DNA
@@ -79,6 +77,47 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 )
 
 # -----------------------------------------------------------------------------
+# AUTH (MVP) — tenant/user no sidebar
+# -----------------------------------------------------------------------------
+def _normalize_tenant(s: str) -> str:
+    s = (s or "").strip().lower()
+    s = re.sub(r"[^a-z0-9._-]+", "-", s).strip("-")
+    return s or "demo"
+
+def _normalize_user(s: str) -> str:
+    s = (s or "").strip().lower()
+    # pode ser email, username etc.
+    s = re.sub(r"[^a-z0-9@._-]+", "", s)
+    return s or "anon"
+
+with st.sidebar:
+    st.markdown("### 🔐 Sessão")
+    tenant_in = st.text_input("Empresa (tenant_id)", value=st.session_state.get("tenant_id", "demo"))
+    user_in = st.text_input("Usuário (email ou id)", value=st.session_state.get("user_id", "anon"))
+    if st.button("✅ Entrar / Trocar sessão"):
+        st.session_state["tenant_id"] = _normalize_tenant(tenant_in)
+        st.session_state["user_id"] = _normalize_user(user_in)
+        st.success("Sessão aplicada.")
+        st.rerun()
+
+TENANT_ID = _normalize_tenant(st.session_state.get("tenant_id", "demo"))
+USER_ID = _normalize_user(st.session_state.get("user_id", "anon"))
+
+# -----------------------------------------------------------------------------
+# STORAGE por tenant (isolamento)
+# -----------------------------------------------------------------------------
+def tenant_root(tenant_id: str) -> Path:
+    p = DATA_DIR / "tenants" / tenant_id
+    p.mkdir(parents=True, exist_ok=True)
+    (p / "artefatos").mkdir(parents=True, exist_ok=True)
+    (p / "propriedades").mkdir(parents=True, exist_ok=True)
+    return p
+
+TENANT_ROOT = tenant_root(TENANT_ID)
+ARTIFACTS_DIR = TENANT_ROOT / "artefatos"
+PROPS_DIR = TENANT_ROOT / "propriedades"
+
+# -----------------------------------------------------------------------------
 # UTIL
 # -----------------------------------------------------------------------------
 def now_iso() -> str:
@@ -96,16 +135,190 @@ def file_sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 def decode_ifc_text(file_bytes: bytes) -> str:
+    # melhor para auditoria do que "ignore" (você enxerga perda como "�")
     try:
-        return file_bytes.decode("utf-8", errors="ignore")
+        return file_bytes.decode("utf-8", errors="replace")
     except Exception:
-        return file_bytes.decode("latin-1", errors="ignore")
+        return file_bytes.decode("latin-1", errors="replace")
 
 def is_pdf(name: str) -> bool:
     return name.lower().endswith(".pdf")
 
 def is_ifc(name: str) -> bool:
     return name.lower().endswith(".ifc")
+
+def make_project_id() -> str:
+    return uuid.uuid4().hex
+
+def make_doc_id(project_id: str, file_hash: str) -> str:
+    # fixo por documento
+    return hashlib.sha1(f"{project_id}|{file_hash}".encode("utf-8")).hexdigest()[:8].upper()
+
+# -----------------------------------------------------------------------------
+# DB (SQLite) — transacional, seguro p/ concorrência leve
+# -----------------------------------------------------------------------------
+def db_conn() -> sqlite3.Connection:
+    con = sqlite3.connect(DB_PATH, check_same_thread=False)
+    con.row_factory = sqlite3.Row
+    return con
+
+def init_db() -> None:
+    with db_conn() as con:
+        con.execute("""
+        CREATE TABLE IF NOT EXISTS projects (
+            project_id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            empreendimento TEXT NOT NULL,
+            disciplina TEXT NOT NULL,
+            created_at_iso TEXT NOT NULL,
+            created_at_br TEXT NOT NULL,
+            status TEXT NOT NULL,
+            engine_version TEXT NOT NULL,
+            doc_id TEXT NOT NULL,
+            file_hash TEXT NOT NULL,
+            original_name TEXT NOT NULL,
+            file_type TEXT NOT NULL,
+            file_size_bytes INTEGER NOT NULL,
+            total_original INTEGER NOT NULL,
+            total_otimizado INTEGER NOT NULL,
+            economia_itens INTEGER NOT NULL,
+            eficiencia_num REAL NOT NULL,
+            confianca_label TEXT NOT NULL,
+            confianca_score INTEGER NOT NULL
+        );
+        """)
+        con.execute("""
+        CREATE INDEX IF NOT EXISTS idx_projects_tenant_created
+        ON projects(tenant_id, created_at_iso DESC);
+        """)
+        con.execute("""
+        CREATE TABLE IF NOT EXISTS project_files (
+            project_id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            ifc_original_path TEXT,
+            ifc_otimizado_path TEXT,
+            evid_pdf_path TEXT,
+            relatorio_pdf_path TEXT,
+            recomendacoes_json_path TEXT,
+            props_json_path TEXT,
+            FOREIGN KEY(project_id) REFERENCES projects(project_id)
+        );
+        """)
+        con.commit()
+
+init_db()
+
+def upsert_project(row: dict, files: dict) -> None:
+    with db_conn() as con:
+        con.execute("""
+        INSERT INTO projects (
+            project_id, tenant_id, user_id, empreendimento, disciplina,
+            created_at_iso, created_at_br, status, engine_version, doc_id,
+            file_hash, original_name, file_type, file_size_bytes,
+            total_original, total_otimizado, economia_itens, eficiencia_num,
+            confianca_label, confianca_score
+        )
+        VALUES (
+            :project_id, :tenant_id, :user_id, :empreendimento, :disciplina,
+            :created_at_iso, :created_at_br, :status, :engine_version, :doc_id,
+            :file_hash, :original_name, :file_type, :file_size_bytes,
+            :total_original, :total_otimizado, :economia_itens, :eficiencia_num,
+            :confianca_label, :confianca_score
+        )
+        ON CONFLICT(project_id) DO UPDATE SET
+            status=excluded.status,
+            total_original=excluded.total_original,
+            total_otimizado=excluded.total_otimizado,
+            economia_itens=excluded.economia_itens,
+            eficiencia_num=excluded.eficiencia_num,
+            confianca_label=excluded.confianca_label,
+            confianca_score=excluded.confianca_score;
+        """, row)
+
+        con.execute("""
+        INSERT INTO project_files (
+            project_id, tenant_id,
+            ifc_original_path, ifc_otimizado_path, evid_pdf_path,
+            relatorio_pdf_path, recomendacoes_json_path, props_json_path
+        )
+        VALUES (
+            :project_id, :tenant_id,
+            :ifc_original_path, :ifc_otimizado_path, :evid_pdf_path,
+            :relatorio_pdf_path, :recomendacoes_json_path, :props_json_path
+        )
+        ON CONFLICT(project_id) DO UPDATE SET
+            ifc_original_path=excluded.ifc_original_path,
+            ifc_otimizado_path=excluded.ifc_otimizado_path,
+            evid_pdf_path=excluded.evid_pdf_path,
+            relatorio_pdf_path=excluded.relatorio_pdf_path,
+            recomendacoes_json_path=excluded.recomendacoes_json_path,
+            props_json_path=excluded.props_json_path;
+        """, files)
+        con.commit()
+
+def carregar_dados(tenant_id: str) -> pd.DataFrame:
+    with db_conn() as con:
+        rows = con.execute("""
+            SELECT p.*, f.ifc_original_path, f.ifc_otimizado_path, f.evid_pdf_path,
+                   f.relatorio_pdf_path, f.recomendacoes_json_path, f.props_json_path
+            FROM projects p
+            LEFT JOIN project_files f ON f.project_id = p.project_id
+            WHERE p.tenant_id = ?
+            ORDER BY p.created_at_iso DESC
+        """, (tenant_id,)).fetchall()
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame([dict(r) for r in rows])
+    return df
+
+def carregar_por_project(project_id: str, tenant_id: str) -> Optional[dict]:
+    with db_conn() as con:
+        r = con.execute("""
+            SELECT p.*, f.ifc_original_path, f.ifc_otimizado_path, f.evid_pdf_path,
+                   f.relatorio_pdf_path, f.recomendacoes_json_path, f.props_json_path
+            FROM projects p
+            LEFT JOIN project_files f ON f.project_id = p.project_id
+            WHERE p.project_id = ? AND p.tenant_id = ?
+            LIMIT 1
+        """, (project_id, tenant_id)).fetchone()
+    return dict(r) if r else None
+
+def excluir_projeto(project_id: str, tenant_id: str) -> None:
+    rec = carregar_por_project(project_id, tenant_id)
+    if not rec:
+        st.error("Projeto não encontrado.")
+        return
+
+    # apagar arquivos
+    for k in ["ifc_original_path","ifc_otimizado_path","evid_pdf_path","relatorio_pdf_path","recomendacoes_json_path","props_json_path"]:
+        p = rec.get(k)
+        if p:
+            try:
+                pp = Path(str(p))
+                if pp.exists():
+                    pp.unlink()
+            except Exception:
+                pass
+
+    # apagar pasta do projeto (se vazia)
+    try:
+        proj_dir = (ARTIFACTS_DIR / project_id)
+        if proj_dir.exists():
+            # remove apenas se estiver vazio (seguro)
+            try:
+                proj_dir.rmdir()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    with db_conn() as con:
+        con.execute("DELETE FROM project_files WHERE project_id=? AND tenant_id=?", (project_id, tenant_id))
+        con.execute("DELETE FROM projects WHERE project_id=? AND tenant_id=?", (project_id, tenant_id))
+        con.commit()
+    st.success("Projeto excluído.")
+    st.rerun()
 
 # -----------------------------------------------------------------------------
 # PROPRIEDADES PROFISSIONAIS (tipadas)
@@ -116,9 +329,9 @@ PRO_FIELDS = {
          "options":["127/220", "220/380", "220 monofásico", "127 monofásico"], "weight":0.10},
         {"key":"padrao_entrada", "label":"Padrão de entrada", "type":"select",
          "options":["Monofásico", "Bifásico", "Trifásico"], "weight":0.10},
-        {"key":"corrente_geral_a", "label":"Disjuntor geral (A)", "type":"number", "min":10.0, "max":1000.0, "weight":0.10},
-        {"key":"demanda_kw", "label":"Demanda estimada (kW)", "type":"number", "min":0.5, "max":5000.0, "weight":0.12},
-        {"key":"fator_demanda", "label":"Fator de demanda (0–1)", "type":"number", "min":0.1, "max":1.0, "weight":0.08},
+        {"key":"corrente_geral_a", "label":"Disjuntor geral (A)", "type":"number", "min":10.0, "max":1000.0, "weight":0.10, "step":5.0},
+        {"key":"demanda_kw", "label":"Demanda estimada (kW)", "type":"number", "min":0.5, "max":5000.0, "weight":0.12, "step":0.5},
+        {"key":"fator_demanda", "label":"Fator de demanda (0–1)", "type":"number", "min":0.1, "max":1.0, "weight":0.08, "step":0.05},
         {"key":"criterio_balanceamento", "label":"Critério de balanceamento", "type":"text", "weight":0.12},
         {"key":"circuitos_criticos", "label":"Circuitos críticos (ex.: chuveiro/ar)", "type":"text", "weight":0.08},
         {"key":"padrao_cabos", "label":"Padrão de cabos (ex.: cobre 750V)", "type":"text", "weight":0.08},
@@ -128,10 +341,10 @@ PRO_FIELDS = {
     "Hidraulica": [
         {"key":"sistema", "label":"Sistema", "type":"select",
          "options":["Água fria", "Água quente", "Água fria + quente", "Esgoto + ventilação"], "weight":0.10},
-        {"key":"pressao_mca", "label":"Pressão disponível (mca)", "type":"number", "min":1.0, "max":200.0, "weight":0.12},
-        {"key":"altura_manometrica_m", "label":"Altura manométrica (m)", "type":"number", "min":0.0, "max":300.0, "weight":0.08},
-        {"key":"vazao_lmin", "label":"Vazão de projeto (L/min)", "type":"number", "min":0.1, "max":5000.0, "weight":0.10},
-        {"key":"reservatorio_l", "label":"Reservatório (L)", "type":"number", "min":0.0, "max":1e7, "weight":0.08},
+        {"key":"pressao_mca", "label":"Pressão disponível (mca)", "type":"number", "min":1.0, "max":200.0, "weight":0.12, "step":1.0},
+        {"key":"altura_manometrica_m", "label":"Altura manométrica (m)", "type":"number", "min":0.0, "max":300.0, "weight":0.08, "step":1.0},
+        {"key":"vazao_lmin", "label":"Vazão de projeto (L/min)", "type":"number", "min":0.1, "max":5000.0, "weight":0.10, "step":1.0},
+        {"key":"reservatorio_l", "label":"Reservatório (L)", "type":"number", "min":0.0, "max":1e7, "weight":0.08, "step":100.0},
         {"key":"material_tubos", "label":"Material de tubulação", "type":"select",
          "options":["PVC", "PPR", "PEX", "Cobre", "Ferro galvanizado", "Outro"], "weight":0.10},
         {"key":"criterio_perda_carga", "label":"Critério de perda de carga", "type":"select",
@@ -144,13 +357,13 @@ PRO_FIELDS = {
     "Estrutural": [
         {"key":"sistema_estrutural", "label":"Sistema estrutural", "type":"select",
          "options":["Concreto armado", "Metálica", "Mista", "Pré-moldado"], "weight":0.08},
-        {"key":"fck_mpa", "label":"fck (MPa)", "type":"number", "min":10.0, "max":100.0, "weight":0.12},
+        {"key":"fck_mpa", "label":"fck (MPa)", "type":"number", "min":10.0, "max":100.0, "weight":0.12, "step":1.0},
         {"key":"aco_classe", "label":"Classe do aço", "type":"select",
          "options":["CA-50", "CA-60", "ASTM A572", "ASTM A36", "Outro"], "weight":0.08},
         {"key":"cargas_kn", "label":"Cargas principais (kN) (resumo)", "type":"text", "weight":0.10},
         {"key":"vento_categoria", "label":"Vento (categoria/região)", "type":"text", "weight":0.06},
         {"key":"solo_spt", "label":"Solo / SPT (resumo)", "type":"text", "weight":0.12},
-        {"key":"cobrimento_mm", "label":"Cobrimento (mm)", "type":"number", "min":5.0, "max":100.0, "weight":0.08},
+        {"key":"cobrimento_mm", "label":"Cobrimento (mm)", "type":"number", "min":5.0, "max":100.0, "weight":0.08, "step":1.0},
         {"key":"classe_agressividade", "label":"Classe de agressividade", "type":"select",
          "options":["I", "II", "III", "IV"], "weight":0.06},
         {"key":"criterio_flecha", "label":"Critério de flecha/serviço", "type":"text", "weight":0.08},
@@ -159,11 +372,11 @@ PRO_FIELDS = {
     ],
 }
 
-def props_path(file_hash: str, disciplina: str) -> Path:
-    return PROPS_DIR / f"PROPS_{safe_filename(disciplina)}_{file_hash[:12]}.json"
+def props_path(tenant_id: str, project_id: str, disciplina: str) -> Path:
+    return PROPS_DIR / f"PROPS_{safe_filename(disciplina)}_{project_id}.json"
 
-def load_props(file_hash: str, disciplina: str) -> dict:
-    p = props_path(file_hash, disciplina)
+def load_props(tenant_id: str, project_id: str, disciplina: str) -> dict:
+    p = props_path(tenant_id, project_id, disciplina)
     if p.exists():
         try:
             return json.loads(p.read_text(encoding="utf-8"))
@@ -171,8 +384,10 @@ def load_props(file_hash: str, disciplina: str) -> dict:
             return {}
     return {}
 
-def save_props(file_hash: str, disciplina: str, props: dict) -> None:
-    props_path(file_hash, disciplina).write_text(json.dumps(props, ensure_ascii=False, indent=2), encoding="utf-8")
+def save_props(tenant_id: str, project_id: str, disciplina: str, props: dict) -> None:
+    props_path(tenant_id, project_id, disciplina).write_text(
+        json.dumps(props, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 def props_score_weighted(props: dict, disciplina: str) -> float:
     fields = PRO_FIELDS.get(disciplina, [])
@@ -190,48 +405,6 @@ def props_score_weighted(props: dict, disciplina: str) -> float:
     return got / total if total > 0 else 0.0
 
 # -----------------------------------------------------------------------------
-# DB SCHEMA
-# -----------------------------------------------------------------------------
-PERSIST_COLS = [
-    "Empreendimento","Disciplina","DataISO","DataBR",
-    "Total_Original","Total_Otimizado","Economia_Itens","Eficiencia_Num",
-    "Confianca","Confianca_Score",
-    "Arquivo_Original","Arquivo_Hash",
-    "Arquivo_Evidencia","Propriedades_JSON",
-    "Recomendacoes_JSON","Relatorio_PDF","Arquivo_Otimizado",
-]
-
-def ensure_schema(df: pd.DataFrame) -> pd.DataFrame:
-    if df is None or df.empty:
-        return pd.DataFrame(columns=PERSIST_COLS)
-    for c in PERSIST_COLS:
-        if c not in df.columns:
-            df[c] = None
-    for col in ["Total_Original","Total_Otimizado","Economia_Itens"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
-    df["Eficiencia_Num"] = pd.to_numeric(df["Eficiencia_Num"], errors="coerce").fillna(0.0).astype(float).clip(0.0,1.0)
-    df["Confianca_Score"] = pd.to_numeric(df["Confianca_Score"], errors="coerce").fillna(0).astype(int).clip(0,100)
-    return df[PERSIST_COLS].copy()
-
-@st.cache_data(show_spinner=False)
-def _read_db(path_str: str) -> pd.DataFrame:
-    p = Path(path_str)
-    if not p.exists():
-        return pd.DataFrame(columns=PERSIST_COLS)
-    return pd.read_csv(p)
-
-def carregar_dados() -> pd.DataFrame:
-    try:
-        return ensure_schema(_read_db(str(DB_FILE)))
-    except Exception as e:
-        st.error(f"Erro ao carregar banco: {e}")
-        return pd.DataFrame(columns=PERSIST_COLS)
-
-def salvar_db(df: pd.DataFrame) -> None:
-    ensure_schema(df).to_csv(DB_FILE, index=False)
-    _read_db.clear()
-
-# -----------------------------------------------------------------------------
 # EXTRAÇÃO + IDs + CHANGE LOG
 # -----------------------------------------------------------------------------
 def processar_mapa(conteudo: str, mapa: Dict[str, Dict[str, str]], seed: int) -> Dict[str, Dict[str, Any]]:
@@ -244,7 +417,8 @@ def processar_mapa(conteudo: str, mapa: Dict[str, Dict[str, str]], seed: int) ->
     resultados: Dict[str, Dict[str, Any]] = {}
     found = False
     for idx, (classe, info) in enumerate(mapa.items()):
-        count = len(re.findall(rf"={re.escape(classe)}\(", conteudo))
+        # mais tolerante (espaços)
+        count = len(re.findall(rf"=\s*{re.escape(classe)}\s*\(", conteudo))
         if count > 0:
             found = True
             fator = det_uniform(0.84, 0.96, idx)
@@ -356,12 +530,6 @@ def confidence_0_100(
     has_ids: bool,
     optimization_applied: bool
 ) -> Tuple[int, str, Dict[str,int]]:
-    # Componentes (somam 100):
-    # - IFC: 0..40
-    # - Props: 0..40
-    # - IDs: 0..10
-    # - Otim aplicado: 0..10
-
     if not dados_ifc:
         ifc_pts = 5
     elif "GENERIC" in dados_ifc and len(dados_ifc) == 1:
@@ -392,13 +560,38 @@ def try_import_ifcopenshell():
     except Exception:
         return None
 
+def _get_or_create_pset(ifcopenshell, model, ent, pset_name: str):
+    """
+    Dedup de Pset: se já existir, retorna o existente; senão cria.
+    Implementação defensiva porque versões do ifcopenshell variam.
+    """
+    try:
+        # tenta inspecionar psets existentes
+        psets = getattr(ent, "IsDefinedBy", None)
+        if psets:
+            for rel in psets:
+                try:
+                    propdef = getattr(rel, "RelatingPropertyDefinition", None)
+                    if propdef and getattr(propdef, "Name", None) == pset_name:
+                        return propdef
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
+    # fallback: cria novo via API
+    import ifcopenshell.api  # type: ignore
+    return ifcopenshell.api.run("pset.add_pset", model, product=ent, name=pset_name)
+
 def apply_optimizations_ifc(
     ifc_in_path: Path,
     ifc_out_path: Path,
     disciplina: str,
     change_log: List[Dict[str, Any]],
     empreendimento: str,
-    props: dict
+    props: dict,
+    tenant_id: str,
+    project_id: str
 ) -> Tuple[bool, str]:
     ifcopenshell = try_import_ifcopenshell()
     if ifcopenshell is None:
@@ -408,9 +601,11 @@ def apply_optimizations_ifc(
         model = ifcopenshell.open(str(ifc_in_path))
         import ifcopenshell.api  # type: ignore
 
+        # marca projeto
         try:
             proj = model.by_type("IfcProject")[0]
-            proj.Description = (proj.Description or "") + f" | QUANTIX OTIMIZADO {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            stamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            proj.Description = (proj.Description or "") + f" | QUANTIX OTIMIZADO {stamp} | {tenant_id}/{project_id}"
         except Exception:
             pass
 
@@ -423,8 +618,10 @@ def apply_optimizations_ifc(
                 if not ent:
                     continue
 
-                pset = ifcopenshell.api.run("pset.add_pset", model, product=ent, name="Pset_QuantixOptimization")
+                pset = _get_or_create_pset(ifcopenshell, model, ent, "Pset_QuantixOptimization")
                 ifcopenshell.api.run("pset.edit_pset", model, pset=pset, properties={
+                    "TenantId": tenant_id,
+                    "ProjectId": project_id,
                     "QuantixProject": empreendimento,
                     "Disciplina": disciplina,
                     "IFC_ID": str(ch.get("ifc_id","")),
@@ -433,18 +630,19 @@ def apply_optimizations_ifc(
                     "Motivo": str(ch.get("motivo","")),
                     "Referencia": str(ch.get("referencia","")),
                     "ContextoCliente": compact,
+                    "EngineVersion": ENGINE_VERSION,
                     "Timestamp": now_iso(),
                 })
 
                 try:
-                    ent.Description = (ent.Description or "") + f" | QUANTIX:{ch['ifc_id']}"
+                    ent.Description = (ent.Description or "") + f" | QUANTIX:{ch['ifc_id']}:{project_id}"
                 except Exception:
                     pass
             except Exception:
                 continue
 
         model.write(str(ifc_out_path))
-        return True, "IFC OTIMIZADO gerado (Pset_QuantixOptimization aplicado)."
+        return True, "IFC OTIMIZADO gerado (Pset_QuantixOptimization aplicado com dedup)."
     except Exception as e:
         return False, f"Falha ao escrever IFC: {e}"
 
@@ -452,6 +650,10 @@ def apply_optimizations_ifc(
 # PDF
 # -----------------------------------------------------------------------------
 class PDFReport(FPDF):
+    def __init__(self, doc_id: str, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._doc_id = doc_id
+
     def header(self):
         self.set_font("Arial", "B", 12)
         self.cell(0, 10, "QUANTIX | RELATORIO PROFISSIONAL", 0, 1, "C")
@@ -463,8 +665,7 @@ class PDFReport(FPDF):
         self.set_y(-15)
         self.set_font("Arial", "I", 8)
         self.set_text_color(128)
-        doc_id = hashlib.sha1(now_iso().encode("utf-8")).hexdigest()[:8].upper()
-        self.cell(0, 10, f"Pagina {self.page_no()} | Doc ID: {doc_id}", 0, 0, "C")
+        self.cell(0, 10, f"Pagina {self.page_no()} | Doc ID: {self._doc_id}", 0, 0, "C")
 
 def gerar_pdf(
     empreendimento: str,
@@ -477,11 +678,15 @@ def gerar_pdf(
     metrics: Tuple[int,int,int,float],
     conf: Tuple[int,str,Dict[str,int]],
     evid_path: Optional[Path],
+    out_dir: Path,
+    doc_id: str,
+    tenant_id: str,
+    project_id: str,
 ) -> Path:
     t_antes, t_depois, econ, eff = metrics
     conf_score, conf_label, breakdown = conf
 
-    pdf = PDFReport()
+    pdf = PDFReport(doc_id=doc_id)
     pdf.add_page()
 
     pdf.set_font("Arial", "B", 16)
@@ -493,6 +698,7 @@ def gerar_pdf(
     pdf.set_font("Arial", "", 9)
     pdf.set_fill_color(245,245,245)
     pdf.cell(0, 8, f"Data: {today_br()} | Arquivo: {original_name} | Hash: {file_hash[:12]}...", 1, 1, "L", fill=True)
+    pdf.cell(0, 8, f"Tenant/Project: {tenant_id}/{project_id} | Engine: {ENGINE_VERSION}", 1, 1, "L", fill=True)
     if evid_path:
         pdf.cell(0, 8, f"Evidência: {evid_path.name}", 1, 1, "L", fill=True)
     pdf.ln(4)
@@ -537,7 +743,7 @@ def gerar_pdf(
     pdf.set_font("Arial", "B", 12)
     pdf.cell(0, 8, "4) Registro de mudanças aplicadas no IFC (por #id)", ln=True)
     pdf.set_font("Arial", "", 9)
-    pdf.multi_cell(0, 5, "Lista de itens marcados no IFC OTIMIZADO via PropertySet (rastreável).")
+    pdf.multi_cell(0, 5, "Itens marcados no IFC OTIMIZADO via PropertySet (rastreável por #id).")
 
     pdf.set_font("Arial", "B", 8)
     pdf.set_fill_color(230)
@@ -558,10 +764,12 @@ def gerar_pdf(
 
     pdf.ln(6)
     pdf.set_font("Arial", "I", 9)
-    pdf.multi_cell(0, 5, "Obs.: Nesta versão, a otimização altera o IFC com metadados rastreáveis (Pset/Description). "
-                         "Substituições físicas (tipo/material/geometria) podem ser adicionadas por regras específicas do padrão BIM.")
+    pdf.multi_cell(0, 5,
+        "Obs.: Nesta versão, a otimização altera o IFC com metadados rastreáveis (Pset/Description). "
+        "Substituições físicas (tipo/material/geometria) exigem regras BIM específicas por disciplina."
+    )
 
-    out = ARTIFACTS_DIR / f"RELATORIO_{safe_filename(disciplina)}_{safe_filename(empreendimento)}_{file_hash[:8]}.pdf"
+    out = out_dir / f"RELATORIO_{safe_filename(disciplina)}_{safe_filename(empreendimento)}_{file_hash[:8]}_{project_id[:8]}.pdf"
     pdf.output(str(out))
     return out
 
@@ -577,6 +785,10 @@ def gerar_json(
     change_log: list,
     metrics: tuple,
     conf: tuple,
+    tenant_id: str,
+    user_id: str,
+    project_id: str,
+    doc_id: str,
 ) -> dict:
     t_antes, t_depois, econ, eff = metrics
     conf_score, conf_label, breakdown = conf
@@ -598,6 +810,11 @@ def gerar_json(
 
     return {
         "produto": "QUANTIX Professional",
+        "engine_version": ENGINE_VERSION,
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+        "project_id": project_id,
+        "doc_id": doc_id,
         "empreendimento": empreendimento,
         "disciplina": disciplina,
         "data_iso": now_iso(),
@@ -619,14 +836,17 @@ def gerar_json(
     }
 
 # -----------------------------------------------------------------------------
-# PIPELINE SALVAR
+# PIPELINE SALVAR (multi-tenant, project_id, sqlite)
 # -----------------------------------------------------------------------------
-def salvar_projeto(empreendimento: str, disciplina: str, uploaded_file, props: dict) -> None:
+def salvar_projeto(tenant_id: str, user_id: str, empreendimento: str, disciplina: str, uploaded_file, props: dict) -> None:
     file_bytes = uploaded_file.getvalue()
     original_name = uploaded_file.name
     file_hash = file_sha256(file_bytes)
+    project_id = make_project_id()
+    doc_id = make_doc_id(project_id, file_hash)
 
-    proj_dir = ARTIFACTS_DIR / safe_filename(empreendimento)
+    # pasta isolada do projeto
+    proj_dir = ARTIFACTS_DIR / project_id
     proj_dir.mkdir(parents=True, exist_ok=True)
 
     evid_path: Optional[Path] = None
@@ -638,15 +858,23 @@ def salvar_projeto(empreendimento: str, disciplina: str, uploaded_file, props: d
     has_ids = False
     optimization_applied = False
 
+    status = "processing"
+
+    # salva "props" (isolado por tenant/project)
+    ppath = props_path(tenant_id, project_id, disciplina)
+    save_props(tenant_id, project_id, disciplina, props)
+
+    # se for PDF (evidência)
     if is_pdf(original_name):
         evid_path = proj_dir / f"EVIDENCIA_{safe_filename(disciplina)}_{safe_filename(original_name)}_{file_hash[:8]}.pdf"
         evid_path.write_bytes(file_bytes)
+        status = "done"  # não tem otimização IFC aqui
     else:
         ifc_original_path = proj_dir / f"ORIGINAL_{safe_filename(disciplina)}_{safe_filename(original_name)}_{file_hash[:8]}.ifc"
         ifc_original_path.write_bytes(file_bytes)
 
         with st.spinner(f"Processando IFC ({disciplina})..."):
-            time.sleep(0.2)
+            time.sleep(0.1)
             dados_ifc = analisar_ifc(disciplina, file_bytes, file_hash)
 
         ifc_text = decode_ifc_text(file_bytes)
@@ -655,72 +883,81 @@ def salvar_projeto(empreendimento: str, disciplina: str, uploaded_file, props: d
         change_log = build_change_log(dados_ifc, ids_map)
 
         ifc_otimizado_path = proj_dir / f"OTIMIZADO_{safe_filename(disciplina)}_{safe_filename(original_name)}_{file_hash[:8]}.ifc"
-        ok, msg = apply_optimizations_ifc(ifc_original_path, ifc_otimizado_path, disciplina, change_log, empreendimento, props)
+        ok, msg = apply_optimizations_ifc(
+            ifc_original_path, ifc_otimizado_path, disciplina, change_log, empreendimento, props,
+            tenant_id=tenant_id, project_id=project_id
+        )
         if ok:
             optimization_applied = True
             st.success(msg)
+            status = "done"
         else:
             st.warning(msg)
-            ifc_otimizado_path = ifc_original_path  # fallback: não quebra o app
+            ifc_otimizado_path = ifc_original_path  # fallback (não quebra)
+            status = "done_with_warning"
 
     metrics = calcular_metricas(dados_ifc)
     conf = confidence_0_100(dados_ifc, props, disciplina, has_ids=has_ids, optimization_applied=optimization_applied)
 
-    ppath = props_path(file_hash, disciplina)
-    save_props(file_hash, disciplina, props)
+    file_meta = {
+        "nome_original": original_name,
+        "hash_sha256": file_hash,
+        "tipo": "PDF" if is_pdf(original_name) else "IFC",
+        "tamanho_bytes": len(file_bytes),
+    }
 
-    file_meta = {"nome_original": original_name, "hash_sha256": file_hash, "tipo": "PDF" if is_pdf(original_name) else "IFC", "tamanho_bytes": len(file_bytes)}
-    obj = gerar_json(empreendimento, disciplina, file_meta, props, dados_ifc, change_log, metrics, conf)
-    rec_path = proj_dir / f"RECOMENDACOES_{safe_filename(disciplina)}_{safe_filename(empreendimento)}_{file_hash[:8]}.json"
+    obj = gerar_json(
+        empreendimento, disciplina, file_meta, props, dados_ifc, change_log, metrics, conf,
+        tenant_id=tenant_id, user_id=user_id, project_id=project_id, doc_id=doc_id
+    )
+
+    rec_path = proj_dir / f"RECOMENDACOES_{safe_filename(disciplina)}_{safe_filename(empreendimento)}_{file_hash[:8]}_{project_id[:8]}.json"
     rec_path.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    pdf_path = gerar_pdf(empreendimento, disciplina, original_name, file_hash, props, dados_ifc, change_log, metrics, conf, evid_path)
+    pdf_path = gerar_pdf(
+        empreendimento, disciplina, original_name, file_hash, props, dados_ifc, change_log,
+        metrics, conf, evid_path, out_dir=proj_dir, doc_id=doc_id, tenant_id=tenant_id, project_id=project_id
+    )
 
-    df = carregar_dados()
     t_antes, t_depois, econ, eff = metrics
     conf_score, conf_label, _breakdown = conf
 
-    novo = {
-        "Empreendimento": empreendimento,
-        "Disciplina": disciplina,
-        "DataISO": now_iso(),
-        "DataBR": today_br(),
-        "Total_Original": int(t_antes),
-        "Total_Otimizado": int(t_depois),
-        "Economia_Itens": int(econ),
-        "Eficiencia_Num": float(eff),
-        "Confianca": conf_label,
-        "Confianca_Score": int(conf_score),
-        "Arquivo_Original": original_name,
-        "Arquivo_Hash": file_hash,
-        "Arquivo_Evidencia": str(evid_path) if evid_path else None,
-        "Propriedades_JSON": str(ppath),
-        "Recomendacoes_JSON": str(rec_path),
-        "Relatorio_PDF": str(pdf_path),
-        "Arquivo_Otimizado": str(ifc_otimizado_path) if ifc_otimizado_path else None,
+    proj_row = {
+        "project_id": project_id,
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+        "empreendimento": empreendimento,
+        "disciplina": disciplina,
+        "created_at_iso": now_iso(),
+        "created_at_br": today_br(),
+        "status": status,
+        "engine_version": ENGINE_VERSION,
+        "doc_id": doc_id,
+        "file_hash": file_hash,
+        "original_name": original_name,
+        "file_type": "PDF" if is_pdf(original_name) else "IFC",
+        "file_size_bytes": int(len(file_bytes)),
+        "total_original": int(t_antes),
+        "total_otimizado": int(t_depois),
+        "economia_itens": int(econ),
+        "eficiencia_num": float(eff),
+        "confianca_label": conf_label,
+        "confianca_score": int(conf_score),
     }
-    df = pd.concat([df, pd.DataFrame([novo])], ignore_index=True)
-    salvar_db(df)
-    st.success("Concluído. Veja em DOCS para baixar IFC OTIMIZADO e relatório.")
 
-def excluir_projeto(index: int) -> None:
-    df = carregar_dados()
-    if index < 0 or index >= len(df):
-        st.error("Índice inválido.")
-        return
-    row = df.iloc[index].to_dict()
-    for k in ["Arquivo_Evidencia","Propriedades_JSON","Recomendacoes_JSON","Relatorio_PDF","Arquivo_Otimizado"]:
-        p = row.get(k)
-        if p:
-            try:
-                pp = Path(str(p))
-                if pp.exists():
-                    pp.unlink()
-            except Exception:
-                pass
-    df = df.drop(index).reset_index(drop=True)
-    salvar_db(df)
-    st.rerun()
+    files_row = {
+        "project_id": project_id,
+        "tenant_id": tenant_id,
+        "ifc_original_path": str(ifc_original_path) if ifc_original_path else None,
+        "ifc_otimizado_path": str(ifc_otimizado_path) if ifc_otimizado_path else None,
+        "evid_pdf_path": str(evid_path) if evid_path else None,
+        "relatorio_pdf_path": str(pdf_path),
+        "recomendacoes_json_path": str(rec_path),
+        "props_json_path": str(ppath),
+    }
+
+    upsert_project(proj_row, files_row)
+    st.success("Concluído. Veja em DOCS para baixar IFC OTIMIZADO e relatório.")
 
 # -----------------------------------------------------------------------------
 # UI
@@ -729,34 +966,40 @@ h1, h2 = st.columns([8,2])
 with h1:
     st.markdown("# <span style='color:#00E5FF'>QUANTI</span><span style='color:#FF9F00'>X</span>", unsafe_allow_html=True)
 with h2:
-    st.markdown('<div class="user-badge">👤 Lucas Teitelbaum</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="user-badge">🏢 {TENANT_ID} • 👤 {USER_ID}</div>', unsafe_allow_html=True)
 st.markdown("---")
 
 tabs = st.tabs(["🚀 Dashboard","⚡ Elétrica","💧 Hidráulica","🏗️ Estrutural","📂 Portfólio","📝 DOCS","🧬 DNA"])
 
 # Dashboard
 with tabs[0]:
-    df = carregar_dados()
+    df = carregar_dados(TENANT_ID)
     if df.empty:
         st.info("Aguardando processamento.")
+        st.caption(f"Tenant: {TENANT_ID} | Engine: {ENGINE_VERSION}")
     else:
         c1,c2,c3,c4 = st.columns(4)
-        c1.metric("Impactos (itens)", int(df["Economia_Itens"].sum()))
-        c2.metric("Eficiência média", f"{float(df['Eficiencia_Num'].mean()*100):.1f}%")
-        c3.metric("Confiança média", f"{float(df['Confianca_Score'].mean()):.0f}/100")
+        c1.metric("Impactos (itens)", int(df["economia_itens"].sum()))
+        c2.metric("Eficiência média", f"{float(df['eficiencia_num'].mean()*100):.1f}%")
+        c3.metric("Confiança média", f"{float(df['confianca_score'].mean()):.0f}/100")
         c4.metric("Projetos", len(df))
         st.markdown("---")
-        agg = df.groupby("Empreendimento", as_index=False)["Economia_Itens"].sum().sort_values("Economia_Itens", ascending=False)
-        st.bar_chart(agg.set_index("Empreendimento")["Economia_Itens"])
-        show = df.sort_values("DataISO", ascending=False).head(10).copy()
-        show["Eficiencia_%"] = (show["Eficiencia_Num"]*100).round(1).astype(str)+"%"
-        st.dataframe(show[["Empreendimento","Disciplina","DataBR","Economia_Itens","Eficiencia_%","Confianca","Confianca_Score","Arquivo_Original"]], use_container_width=True)
+
+        agg = df.groupby("empreendimento", as_index=False)["economia_itens"].sum().sort_values("economia_itens", ascending=False)
+        st.bar_chart(agg.set_index("empreendimento")["economia_itens"])
+
+        show = df.sort_values("created_at_iso", ascending=False).head(10).copy()
+        show["eficiencia_%"] = (show["eficiencia_num"]*100).round(1).astype(str)+"%"
+        st.dataframe(
+            show[["empreendimento","disciplina","created_at_br","economia_itens","eficiencia_%","confianca_label","confianca_score","original_name","status"]],
+            use_container_width=True
+        )
 
 # -----------------------------------------------------------------------------
-# PATCH DEFINITIVO AQUI: render_props_form (number_input nunca abaixo do min)
+# PATCH DEFINITIVO: render_props_form (number_input nunca abaixo do min)
 # -----------------------------------------------------------------------------
-def render_props_form(disciplina: str, file_hash: str, key_prefix: str) -> dict:
-    saved = load_props(file_hash, disciplina)
+def render_props_form(tenant_id: str, disciplina: str, project_id: str, key_prefix: str) -> dict:
+    saved = load_props(tenant_id, project_id, disciplina)
     props = dict(saved)
 
     fields = PRO_FIELDS.get(disciplina, [])
@@ -768,9 +1011,9 @@ def render_props_form(disciplina: str, file_hash: str, key_prefix: str) -> dict:
             sk = f"{key_prefix}_{k}"
 
             if typ == "number":
-                # ---- PATCH: value sempre >= min_value e <= max_value
                 minv = float(f.get("min", -1e18))
                 maxv = float(f.get("max",  1e18))
+                step = float(f.get("step", 1.0))
 
                 v0 = props.get(k)
                 try:
@@ -778,11 +1021,9 @@ def render_props_form(disciplina: str, file_hash: str, key_prefix: str) -> dict:
                 except Exception:
                     v0 = None
 
-                # se não tem valor, inicia no mínimo
                 if v0 is None:
                     v0 = minv
 
-                # clamp
                 if v0 < minv:
                     v0 = minv
                 if v0 > maxv:
@@ -793,6 +1034,7 @@ def render_props_form(disciplina: str, file_hash: str, key_prefix: str) -> dict:
                     value=v0,
                     min_value=minv,
                     max_value=maxv,
+                    step=step,
                     key=sk
                 )
 
@@ -808,11 +1050,11 @@ def render_props_form(disciplina: str, file_hash: str, key_prefix: str) -> dict:
         cA, cB = st.columns(2)
         with cA:
             if st.button("💾 Salvar propriedades", key=f"save_{key_prefix}"):
-                save_props(file_hash, disciplina, props)
+                save_props(tenant_id, project_id, disciplina, props)
                 st.success("Propriedades salvas.")
         with cB:
             if st.button("↩️ Limpar propriedades", key=f"clear_{key_prefix}"):
-                save_props(file_hash, disciplina, {})
+                save_props(tenant_id, project_id, disciplina, {})
                 st.warning("Propriedades limpas.")
                 st.rerun()
 
@@ -824,18 +1066,26 @@ def upload_form(title: str, disciplina: str, key: str, descricao: str):
     with colA:
         nome = st.text_input("Empreendimento", key=f"nm_{key}")
         st.info(descricao)
+        st.caption("Multiusuário MVP: dados isolados por tenant e project_id.")
     with colB:
-        file_obj = st.file_uploader("Envie IFC (otimização real) ou PDF (evidência)", type=["ifc","pdf"], key=f"up_{key}")
+        file_obj = st.file_uploader("Envie IFC (otimização por metadados rastreáveis) ou PDF (evidência)", type=["ifc","pdf"], key=f"up_{key}")
 
     if not file_obj or not nome:
         return
 
+    # Project id pré-criado só para props na UI; o definitivo é criado ao processar.
+    # (isso evita salvar props em arquivo “solto” antes do clique)
+    ui_project_id = st.session_state.get(f"ui_project_{key}")
+    if not ui_project_id:
+        ui_project_id = make_project_id()
+        st.session_state[f"ui_project_{key}"] = ui_project_id
+
+    props = render_props_form(TENANT_ID, disciplina, ui_project_id, key_prefix=f"prop_{key}")
+
+    # prévia confiança (sem escrever IFC ainda)
     file_bytes = file_obj.getvalue()
     file_hash = file_sha256(file_bytes)
 
-    props = render_props_form(disciplina, file_hash, key_prefix=f"prop_{key}")
-
-    # prévia confiança (sem escrever IFC ainda)
     dados_prev = {}
     has_ids = False
     if is_ifc(file_obj.name):
@@ -847,14 +1097,19 @@ def upload_form(title: str, disciplina: str, key: str, descricao: str):
             pass
 
     conf_preview = confidence_0_100(dados_prev, props, disciplina, has_ids=has_ids, optimization_applied=False)
-    st.caption(f"Prévia de confiança: **{conf_preview[1]} ({conf_preview[0]}/100)** — "
-               f"IFC={conf_preview[2]['IFC']} Props={conf_preview[2]['Props']} IDs={conf_preview[2]['IDs']} Otim=0")
+    st.caption(
+        f"Prévia de confiança: **{conf_preview[1]} ({conf_preview[0]}/100)** — "
+        f"IFC={conf_preview[2]['IFC']} Props={conf_preview[2]['Props']} IDs={conf_preview[2]['IDs']} Otim=0"
+    )
 
     if is_pdf(file_obj.name):
-        st.warning("PDF é apenas evidência. Para IFC OTIMIZADO real, envie um arquivo .IFC.")
+        st.warning("PDF é apenas evidência. Para gerar IFC OTIMIZADO rastreável, envie um arquivo .IFC.")
 
     if st.button("💾 Processar", key=f"btn_{key}"):
-        salvar_projeto(nome, disciplina, file_obj, props)
+        # cria project_id definitivo na pipeline
+        salvar_projeto(TENANT_ID, USER_ID, nome, disciplina, file_obj, props)
+        # reseta UI project id
+        st.session_state.pop(f"ui_project_{key}", None)
 
 # Disciplinas
 with tabs[1]:
@@ -869,163 +1124,83 @@ with tabs[3]:
 
 # Portfólio
 with tabs[4]:
-    df = carregar_dados()
+    df = carregar_dados(TENANT_ID)
     if df.empty:
         st.info("Nenhum projeto ainda.")
     else:
-        dfv = df.sort_values("DataISO", ascending=False).reset_index(drop=True)
+        dfv = df.sort_values("created_at_iso", ascending=False).reset_index(drop=True)
         for i, row in dfv.iterrows():
             c1,c2,c3,c4,c5 = st.columns([4,2,2,2,1])
-            c1.write(f"**{row['Empreendimento']}** ({row.get('Disciplina','-')})")
-            c2.write(f"Economia: **{int(row['Economia_Itens'])}**")
-            c3.write(f"Eff: **{float(row['Eficiencia_Num'])*100:.1f}%**")
-            c4.write(f"Conf: **{row.get('Confianca','-')} {int(row.get('Confianca_Score',0))}/100**")
-            if c5.button("🗑️", key=f"del_{i}"):
-                real_idx = int(df.index[df["Arquivo_Hash"] == row["Arquivo_Hash"]][0])
-                excluir_projeto(real_idx)
+            c1.write(f"**{row['empreendimento']}** ({row.get('disciplina','-')})")
+            c2.write(f"Economia: **{int(row['economia_itens'])}**")
+            c3.write(f"Eff: **{float(row['eficiencia_num'])*100:.1f}%**")
+            c4.write(f"Conf: **{row.get('confianca_label','-')} {int(row.get('confianca_score',0))}/100**")
+            if c5.button("🗑️", key=f"del_{row['project_id']}"):
+                excluir_projeto(str(row["project_id"]), TENANT_ID)
 
 # DOCS
 with tabs[5]:
-    df = carregar_dados()
+    df = carregar_dados(TENANT_ID)
     if df.empty:
         st.info("Sem documentos ainda.")
     else:
-        sel = st.selectbox("Empreendimento:", sorted(df["Empreendimento"].unique()))
-        projetos = df[df["Empreendimento"] == sel].sort_values("DataISO", ascending=False)
+        sel = st.selectbox("Empreendimento:", sorted(df["empreendimento"].unique()))
+        projetos = df[df["empreendimento"] == sel].sort_values("created_at_iso", ascending=False)
+
         for _, d in projetos.iterrows():
             st.markdown(
-                f"**Disciplina:** {d.get('Disciplina','-')} — **Data:** {d.get('DataBR','-')} — "
-                f"**Eficiência:** {float(d.get('Eficiencia_Num',0))*100:.1f}% — "
-                f"**Confiança:** {d.get('Confianca','-')} ({int(d.get('Confianca_Score',0))}/100)"
+                f"**Disciplina:** {d.get('disciplina','-')} — **Data:** {d.get('created_at_br','-')} — "
+                f"**Eficiência:** {float(d.get('eficiencia_num',0))*100:.1f}% — "
+                f"**Confiança:** {d.get('confianca_label','-')} ({int(d.get('confianca_score',0))}/100) — "
+                f"**Doc ID:** `{d.get('doc_id','-')}` — **Status:** `{d.get('status','-')}`"
             )
             c1,c2,c3,c4 = st.columns(4)
 
-            pdfp = d.get("Relatorio_PDF")
+            pdfp = d.get("relatorio_pdf_path")
             if pdfp and Path(str(pdfp)).exists():
                 with open(str(pdfp), "rb") as f:
-                    c1.download_button("📥 Relatório PDF", f, file_name=Path(str(pdfp)).name, key=f"dl_pdf_{d.name}")
+                    c1.download_button("📥 Relatório PDF", f, file_name=Path(str(pdfp)).name, key=f"dl_pdf_{d['project_id']}")
 
-            recp = d.get("Recomendacoes_JSON")
+            recp = d.get("recomendacoes_json_path")
             if recp and Path(str(recp)).exists():
                 with open(str(recp), "rb") as f:
-                    c2.download_button("🧾 JSON técnico", f, file_name=Path(str(recp)).name, key=f"dl_json_{d.name}")
+                    c2.download_button("🧾 JSON técnico", f, file_name=Path(str(recp)).name, key=f"dl_json_{d['project_id']}")
 
-            ifcp = d.get("Arquivo_Otimizado")
+            ifcp = d.get("ifc_otimizado_path")
             if ifcp and Path(str(ifcp)).exists():
                 with open(str(ifcp), "rb") as f:
-                    c3.download_button("📦 IFC OTIMIZADO", f, file_name=Path(str(ifcp)).name, key=f"dl_ifc_{d.name}")
+                    c3.download_button("📦 IFC OTIMIZADO", f, file_name=Path(str(ifcp)).name, key=f"dl_ifc_{d['project_id']}")
 
-            evp = d.get("Arquivo_Evidencia")
+            evp = d.get("evid_pdf_path")
             if evp and Path(str(evp)).exists():
                 with open(str(evp), "rb") as f:
-                    c4.download_button("🧷 Evidência (PDF)", f, file_name=Path(str(evp)).name, key=f"dl_evd_{d.name}")
+                    c4.download_button("🧷 Evidência (PDF)", f, file_name=Path(str(evp)).name, key=f"dl_evd_{d['project_id']}")
 
             st.divider()
 
-# DNA
+# DNA (mantido)
 with tabs[6]:
-
     st.markdown("""
     <style>
-    .dna-wrap{
-        display:flex;
-        flex-direction:column;
-        gap:18px;
-    }
-
-    .dna-core{
-        padding:32px;
-        border-radius:22px;
-        background: rgba(255,255,255,0.02);
-        border:1px solid rgba(255,255,255,0.08);
-    }
-
-    .dna-tag{
-        font-size:13px;
-        letter-spacing:3px;
-        opacity:0.6;
-        margin-bottom:14px;
-        text-transform: uppercase;
-    }
-
-    .dna-core h1{
-        font-size:34px;
-        font-weight:900;
-        letter-spacing:2px;
-        margin:0 0 6px 0;
-    }
-
-    .dna-core span.q{ color:#00E5FF; }
-    .dna-core span.x{ color:#FF9F00; }
-
-    .dna-sub{
-        opacity:0.78;
-        font-size:15px;
-        line-height:1.6;
-        max-width: 980px;
-        margin-top:10px;
-    }
-
-    .dna-grid{
-        display:flex;
-        flex-direction:column;
-        gap:16px;
-    }
-
-    .dna-node{
-        padding:24px 26px;
-        border-radius:18px;
-        background: rgba(0,0,0,0.25);
-        border:1px solid rgba(255,255,255,0.10);
-        position:relative;
-    }
-
-    .dna-node.blue{
-        border:1px solid #00E5FF;
-        box-shadow: 0 0 14px rgba(0,229,255,0.12);
-    }
-
-    .dna-node.orange{
-        border:1px solid #FF9F00;
-        box-shadow: 0 0 14px rgba(255,159,0,0.12);
-    }
-
-    .dna-node h3{
-        font-size:18px;
-        font-weight:900;
-        letter-spacing:1px;
-        margin:0 0 10px 0;
-        text-transform: uppercase;
-    }
-
-    .dna-node p{
-        font-size:15px;
-        line-height:1.65;
-        opacity:0.86;
-        margin:0;
-        max-width: 1050px;
-    }
-
-    .dna-micro{
-        margin-top:10px;
-        font-size:13px;
-        opacity:0.6;
-        letter-spacing:2px;
-        text-transform: uppercase;
-    }
-
-    @media (max-width: 768px){
-        .dna-core h1{ font-size:28px; }
-        .dna-node{ padding:20px; }
-        .dna-node p{ font-size:15px; }
-    }
+    .dna-wrap{ display:flex; flex-direction:column; gap:18px; }
+    .dna-core{ padding:32px; border-radius:22px; background: rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.08); }
+    .dna-tag{ font-size:13px; letter-spacing:3px; opacity:0.6; margin-bottom:14px; text-transform: uppercase; }
+    .dna-core h1{ font-size:34px; font-weight:900; letter-spacing:2px; margin:0 0 6px 0; }
+    .dna-core span.q{ color:#00E5FF; } .dna-core span.x{ color:#FF9F00; }
+    .dna-sub{ opacity:0.78; font-size:15px; line-height:1.6; max-width: 980px; margin-top:10px; }
+    .dna-grid{ display:flex; flex-direction:column; gap:16px; }
+    .dna-node{ padding:24px 26px; border-radius:18px; background: rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.10); position:relative; }
+    .dna-node.blue{ border:1px solid #00E5FF; box-shadow: 0 0 14px rgba(0,229,255,0.12); }
+    .dna-node.orange{ border:1px solid #FF9F00; box-shadow: 0 0 14px rgba(255,159,0,0.12); }
+    .dna-node h3{ font-size:18px; font-weight:900; letter-spacing:1px; margin:0 0 10px 0; text-transform: uppercase; }
+    .dna-node p{ font-size:15px; line-height:1.65; opacity:0.86; margin:0; max-width: 1050px; }
+    .dna-micro{ margin-top:10px; font-size:13px; opacity:0.6; letter-spacing:2px; text-transform: uppercase; }
+    @media (max-width: 768px){ .dna-core h1{ font-size:28px; } .dna-node{ padding:20px; } .dna-node p{ font-size:15px; } }
     </style>
     """, unsafe_allow_html=True)
 
     st.markdown('<div class="dna-wrap">', unsafe_allow_html=True)
-
-    # CABEÇALHO
-    st.markdown("""
+    st.markdown(f"""
     <div class="dna-core">
         <div class="dna-tag">ARQUITETURA DO SISTEMA</div>
         <h1><span class="q">QUANTI</span><span class="x">X</span> STRATEGIC</h1>
@@ -1034,14 +1209,14 @@ with tabs[6]:
             Cada intervenção possui justificativa, registro e evidência.
         </div>
         <div class="dna-sub" style="margin-top:10px;">
-            <b>Evidência que vira economia.</b>
+            <b>Evidência que vira economia.</b><br>
+            <span style="opacity:0.8;">Tenant atual:</span> <b>{TENANT_ID}</b> • <span style="opacity:0.8;">Usuário:</span> <b>{USER_ID}</b> • <span style="opacity:0.8;">Engine:</span> <b>{ENGINE_VERSION}</b>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown('<div class="dna-grid">', unsafe_allow_html=True)
 
-    # QUANTI
     st.markdown("""
     <div class="dna-node blue">
         <h3 style="color:#00E5FF;">NÚCLEO QUANTI</h3>
@@ -1054,7 +1229,6 @@ with tabs[6]:
     </div>
     """, unsafe_allow_html=True)
 
-    # X
     st.markdown("""
     <div class="dna-node orange">
         <h3 style="color:#FF9F00;">NÚCLEO X</h3>
@@ -1067,7 +1241,6 @@ with tabs[6]:
     </div>
     """, unsafe_allow_html=True)
 
-    # CONFIANÇA
     st.markdown("""
     <div class="dna-node">
         <h3>MATRIZ DE CONFIANÇA</h3>
@@ -1080,7 +1253,6 @@ with tabs[6]:
     </div>
     """, unsafe_allow_html=True)
 
-    # RASTREIO
     st.markdown("""
     <div class="dna-node">
         <h3>CAMADA DE RASTREIO</h3>
@@ -1093,7 +1265,6 @@ with tabs[6]:
     </div>
     """, unsafe_allow_html=True)
 
-    # STORYTELLING COM CEO
     st.markdown("""
     <div class="dna-node">
         <h3>ORIGEM DO SISTEMA</h3>
@@ -1120,4 +1291,3 @@ with tabs[6]:
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.caption("QUANTIX Strategic Engine | Evidência • Rastreabilidade • Profissional")
-

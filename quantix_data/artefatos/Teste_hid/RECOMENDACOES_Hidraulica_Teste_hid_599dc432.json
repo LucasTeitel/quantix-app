@@ -1,0 +1,109 @@
+{
+  "produto": "QUANTIX Professional",
+  "empreendimento": "Teste hid",
+  "disciplina": "Hidraulica",
+  "data_iso": "2026-03-04T09:10:01",
+  "arquivo": {
+    "nome_original": "AGH-HID-EX-002-IFC-R11.ifc",
+    "hash_sha256": "599dc4322d2aa29ede51979bb59e960dcb5ea682a0bd1ba375e289f7a8a33898",
+    "tipo": "IFC",
+    "tamanho_bytes": 50878991
+  },
+  "propriedades_cliente": {
+    "sistema": "Água fria",
+    "pressao_mca": 1.0,
+    "altura_manometrica_m": 0.0,
+    "vazao_lmin": 0.1,
+    "reservatorio_l": 0.0,
+    "material_tubos": "PVC",
+    "criterio_perda_carga": "Darcy-Weisbach",
+    "tipo_esgoto": "Primário",
+    "nrm_referencia": "",
+    "observacoes": ""
+  },
+  "indicadores": {
+    "total_original": 62,
+    "total_otimizado": 55,
+    "economia_itens": 7,
+    "eficiencia_pct": 11.29
+  },
+  "confianca": {
+    "score": 65,
+    "nivel": "Média",
+    "breakdown": {
+      "IFC": 25,
+      "Props": 30,
+      "IDs": 10,
+      "Otim": 0
+    }
+  },
+  "recomendacoes_resumo": [
+    {
+      "classe": "IFCFLOWCONTROLLER",
+      "produto": "Registros/Válvulas",
+      "antes": 62,
+      "depois": 55,
+      "economia": 7,
+      "motivo": "Acessibilidade",
+      "referencia": "Reposicionamento para manutenção"
+    }
+  ],
+  "registro_mudancas_aplicadas": [
+    {
+      "ifc_id": "#155789",
+      "classe": "IFCFLOWCONTROLLER",
+      "produto": "Registros/Válvulas",
+      "acao": "OTIMIZAÇÃO APLICADA (Pset QUANTIX)",
+      "motivo": "Acessibilidade",
+      "referencia": "Reposicionamento para manutenção"
+    },
+    {
+      "ifc_id": "#157910",
+      "classe": "IFCFLOWCONTROLLER",
+      "produto": "Registros/Válvulas",
+      "acao": "OTIMIZAÇÃO APLICADA (Pset QUANTIX)",
+      "motivo": "Acessibilidade",
+      "referencia": "Reposicionamento para manutenção"
+    },
+    {
+      "ifc_id": "#170501",
+      "classe": "IFCFLOWCONTROLLER",
+      "produto": "Registros/Válvulas",
+      "acao": "OTIMIZAÇÃO APLICADA (Pset QUANTIX)",
+      "motivo": "Acessibilidade",
+      "referencia": "Reposicionamento para manutenção"
+    },
+    {
+      "ifc_id": "#182407",
+      "classe": "IFCFLOWCONTROLLER",
+      "produto": "Registros/Válvulas",
+      "acao": "OTIMIZAÇÃO APLICADA (Pset QUANTIX)",
+      "motivo": "Acessibilidade",
+      "referencia": "Reposicionamento para manutenção"
+    },
+    {
+      "ifc_id": "#188692",
+      "classe": "IFCFLOWCONTROLLER",
+      "produto": "Registros/Válvulas",
+      "acao": "OTIMIZAÇÃO APLICADA (Pset QUANTIX)",
+      "motivo": "Acessibilidade",
+      "referencia": "Reposicionamento para manutenção"
+    },
+    {
+      "ifc_id": "#195742",
+      "classe": "IFCFLOWCONTROLLER",
+      "produto": "Registros/Válvulas",
+      "acao": "OTIMIZAÇÃO APLICADA (Pset QUANTIX)",
+      "motivo": "Acessibilidade",
+      "referencia": "Reposicionamento para manutenção"
+    },
+    {
+      "ifc_id": "#197481",
+      "classe": "IFCFLOWCONTROLLER",
+      "produto": "Registros/Válvulas",
+      "acao": "OTIMIZAÇÃO APLICADA (Pset QUANTIX)",
+      "motivo": "Acessibilidade",
+      "referencia": "Reposicionamento para manutenção"
+    }
+  ]
+}

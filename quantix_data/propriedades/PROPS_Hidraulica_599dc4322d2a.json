@@ -1,0 +1,12 @@
+{
+  "sistema": "Água fria",
+  "pressao_mca": 1.0,
+  "altura_manometrica_m": 0.0,
+  "vazao_lmin": 0.1,
+  "reservatorio_l": 0.0,
+  "material_tubos": "PVC",
+  "criterio_perda_carga": "Darcy-Weisbach",
+  "tipo_esgoto": "Primário",
+  "nrm_referencia": "",
+  "observacoes": ""
+}
