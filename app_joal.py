@@ -1,11 +1,23 @@
 # app_joal.py  (CÓDIGO MESTRE - FIXADO)
-# QUANTIX — Profissional (single-file) pronto para MVP multiusuário
-# - Multi-tenant (tenant_id) + user_id (login simples no sidebar)
-# - Project ID único (uuid4) e isolamento de artefatos por tenant/project
-# - Banco transacional SQLite (no lugar do CSV)
-# - PDF Doc ID fixo por documento (não muda a cada página)
-# - Pset dedup (evita duplicar Pset_QuantixOptimization ao reprocessar)
-# - Mantém: propriedades tipadas, confiança 0–100, IFC otimizado (Pset/Description), PDF, JSON change_log
+# QUANTIX — Profissional (single-file) + MVP Multiusuário + PDF robusto (fpdf2)
+#
+# ✅ Inclui:
+# - Multiusuário MVP: tenant_id + user_id (sidebar) + isolamento de dados por tenant
+# - Project ID único (uuid4) e artefatos em: quantix_data/tenants/<tenant>/artefatos/<project_id>/
+# - Banco SQLite (quantix_data/quantix.db) no lugar do CSV
+# - Upload funcional em TODAS as abas (Elétrica/Hidráulica/Estrutural)
+# - Aba DOCS mostra e permite baixar IFC/JSON/PDF por tenant
+# - Exclusão por project_id (correta)
+# - PDF: Doc ID fixo + prevenção do erro "Not enough horizontal space..."
+# - IFC: aplica Pset com dedup e marca Description com tenant/project
+#
+# ⚠️ requirements.txt mínimo:
+# streamlit==1.54.0
+# pandas==2.3.3
+# fpdf2==2.7.9
+# ifcopenshell==0.8.4.post1
+# numpy==2.2.6
+# pillow==12.1.0
 
 import re
 import json
@@ -28,7 +40,7 @@ from fpdf import FPDF
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s - %(message)s")
 logger = logging.getLogger("quantix")
 
-ENGINE_VERSION = "2026.03.04-multiuser-mvp"
+ENGINE_VERSION = "2026.03.04-multiuser-mvp+pdfsafe"
 
 # -----------------------------------------------------------------------------
 # STREAMLIT
@@ -86,15 +98,15 @@ def _normalize_tenant(s: str) -> str:
 
 def _normalize_user(s: str) -> str:
     s = (s or "").strip().lower()
-    # pode ser email, username etc.
     s = re.sub(r"[^a-z0-9@._-]+", "", s)
     return s or "anon"
 
 with st.sidebar:
     st.markdown("### 🔐 Sessão")
+    st.caption("MVP Multiusuário: dados isolados por tenant.")
     tenant_in = st.text_input("Empresa (tenant_id)", value=st.session_state.get("tenant_id", "demo"))
     user_in = st.text_input("Usuário (email ou id)", value=st.session_state.get("user_id", "anon"))
-    if st.button("✅ Entrar / Trocar sessão"):
+    if st.button("✅ Aplicar sessão"):
         st.session_state["tenant_id"] = _normalize_tenant(tenant_in)
         st.session_state["user_id"] = _normalize_user(user_in)
         st.success("Sessão aplicada.")
@@ -135,7 +147,7 @@ def file_sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 def decode_ifc_text(file_bytes: bytes) -> str:
-    # melhor para auditoria do que "ignore" (você enxerga perda como "�")
+    # replace ajuda a ver perdas e evita crashes
     try:
         return file_bytes.decode("utf-8", errors="replace")
     except Exception:
@@ -151,11 +163,30 @@ def make_project_id() -> str:
     return uuid.uuid4().hex
 
 def make_doc_id(project_id: str, file_hash: str) -> str:
-    # fixo por documento
     return hashlib.sha1(f"{project_id}|{file_hash}".encode("utf-8")).hexdigest()[:8].upper()
 
+def pdf_safe_text(s: Any, max_len: int = 220) -> str:
+    """
+    Evita crashes no fpdf2:
+    - normaliza caracteres
+    - trunca texto muito longo
+    - quebra strings longas sem espaços (hash/path)
+    """
+    t = "" if s is None else str(s)
+    t = t.replace("\r", " ").replace("\n", " ").replace("\t", " ")
+    t = t.replace("–", "-").replace("—", "-")
+    t = re.sub(r"\s+", " ", t).strip()
+
+    if len(t) > max_len:
+        t = t[: max_len - 3] + "..."
+
+    if len(t) > 80 and (" " not in t):
+        t = " ".join([t[i:i+32] for i in range(0, len(t), 32)])
+
+    return t
+
 # -----------------------------------------------------------------------------
-# DB (SQLite) — transacional, seguro p/ concorrência leve
+# DB (SQLite)
 # -----------------------------------------------------------------------------
 def db_conn() -> sqlite3.Connection:
     con = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -269,8 +300,7 @@ def carregar_dados(tenant_id: str) -> pd.DataFrame:
         """, (tenant_id,)).fetchall()
     if not rows:
         return pd.DataFrame()
-    df = pd.DataFrame([dict(r) for r in rows])
-    return df
+    return pd.DataFrame([dict(r) for r in rows])
 
 def carregar_por_project(project_id: str, tenant_id: str) -> Optional[dict]:
     with db_conn() as con:
@@ -290,7 +320,6 @@ def excluir_projeto(project_id: str, tenant_id: str) -> None:
         st.error("Projeto não encontrado.")
         return
 
-    # apagar arquivos
     for k in ["ifc_original_path","ifc_otimizado_path","evid_pdf_path","relatorio_pdf_path","recomendacoes_json_path","props_json_path"]:
         p = rec.get(k)
         if p:
@@ -301,11 +330,10 @@ def excluir_projeto(project_id: str, tenant_id: str) -> None:
             except Exception:
                 pass
 
-    # apagar pasta do projeto (se vazia)
     try:
-        proj_dir = (ARTIFACTS_DIR / project_id)
+        proj_dir = ARTIFACTS_DIR / project_id
         if proj_dir.exists():
-            # remove apenas se estiver vazio (seguro)
+            # remove só se vazio
             try:
                 proj_dir.rmdir()
             except Exception:
@@ -417,7 +445,6 @@ def processar_mapa(conteudo: str, mapa: Dict[str, Dict[str, str]], seed: int) ->
     resultados: Dict[str, Dict[str, Any]] = {}
     found = False
     for idx, (classe, info) in enumerate(mapa.items()):
-        # mais tolerante (espaços)
         count = len(re.findall(rf"=\s*{re.escape(classe)}\s*\(", conteudo))
         if count > 0:
             found = True
@@ -563,10 +590,8 @@ def try_import_ifcopenshell():
 def _get_or_create_pset(ifcopenshell, model, ent, pset_name: str):
     """
     Dedup de Pset: se já existir, retorna o existente; senão cria.
-    Implementação defensiva porque versões do ifcopenshell variam.
     """
     try:
-        # tenta inspecionar psets existentes
         psets = getattr(ent, "IsDefinedBy", None)
         if psets:
             for rel in psets:
@@ -579,7 +604,6 @@ def _get_or_create_pset(ifcopenshell, model, ent, pset_name: str):
     except Exception:
         pass
 
-    # fallback: cria novo via API
     import ifcopenshell.api  # type: ignore
     return ifcopenshell.api.run("pset.add_pset", model, product=ent, name=pset_name)
 
@@ -601,7 +625,6 @@ def apply_optimizations_ifc(
         model = ifcopenshell.open(str(ifc_in_path))
         import ifcopenshell.api  # type: ignore
 
-        # marca projeto
         try:
             proj = model.by_type("IfcProject")[0]
             stamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -642,7 +665,7 @@ def apply_optimizations_ifc(
                 continue
 
         model.write(str(ifc_out_path))
-        return True, "IFC OTIMIZADO gerado (Pset_QuantixOptimization aplicado com dedup)."
+        return True, "IFC OTIMIZADO gerado (Pset_QuantixOptimization aplicado)."
     except Exception as e:
         return False, f"Falha ao escrever IFC: {e}"
 
@@ -688,38 +711,49 @@ def gerar_pdf(
 
     pdf = PDFReport(doc_id=doc_id)
     pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
 
     pdf.set_font("Arial", "B", 16)
-    pdf.cell(0, 10, f"PROJETO: {empreendimento.upper()}", ln=True)
+    pdf.cell(0, 10, pdf_safe_text(f"PROJETO: {empreendimento.upper()}", 120), ln=True)
     pdf.set_font("Arial", "I", 11)
-    pdf.cell(0, 8, f"Disciplina: {disciplina} | Confiança: {conf_label} ({conf_score}/100)", ln=True)
+    pdf.cell(0, 8, pdf_safe_text(f"Disciplina: {disciplina} | Confiança: {conf_label} ({conf_score}/100)", 120), ln=True)
     pdf.ln(2)
 
     pdf.set_font("Arial", "", 9)
     pdf.set_fill_color(245,245,245)
-    pdf.cell(0, 8, f"Data: {today_br()} | Arquivo: {original_name} | Hash: {file_hash[:12]}...", 1, 1, "L", fill=True)
-    pdf.cell(0, 8, f"Tenant/Project: {tenant_id}/{project_id} | Engine: {ENGINE_VERSION}", 1, 1, "L", fill=True)
+    pdf.cell(0, 8, pdf_safe_text(f"Data: {today_br()} | Arquivo: {original_name} | Hash: {file_hash[:12]}..."), 1, 1, "L", fill=True)
+    pdf.cell(0, 8, pdf_safe_text(f"Tenant/Project: {tenant_id}/{project_id} | Engine: {ENGINE_VERSION}", 140), 1, 1, "L", fill=True)
     if evid_path:
-        pdf.cell(0, 8, f"Evidência: {evid_path.name}", 1, 1, "L", fill=True)
+        pdf.cell(0, 8, pdf_safe_text(f"Evidência: {evid_path.name}", 140), 1, 1, "L", fill=True)
     pdf.ln(4)
 
     pdf.set_font("Arial", "B", 12)
     pdf.cell(0, 8, "1) Contexto informado (propriedades)", ln=True)
     pdf.set_font("Arial", "", 9)
+
     if props:
-        for k, v in list(props.items())[:14]:
+        for k, v in list(props.items())[:18]:
             if str(v).strip():
-                pdf.multi_cell(0, 5, f"- {k}: {v}")
+                # garante largura útil (evita crash do fpdf2)
+                pdf.set_x(pdf.l_margin)
+                pdf.multi_cell(0, 5, f"- {pdf_safe_text(k, 60)}: {pdf_safe_text(v, 220)}")
     else:
+        pdf.set_x(pdf.l_margin)
         pdf.multi_cell(0, 5, "Não informado.")
     pdf.ln(2)
 
     pdf.set_font("Arial", "B", 12)
     pdf.cell(0, 8, "2) Indicadores", ln=True)
     pdf.set_font("Arial", "", 10)
-    pdf.multi_cell(0, 6, f"Total original: {t_antes} | Total otimizado: {t_depois} | Economia: {econ} | Eficiência: {eff*100:.1f}%")
+    pdf.set_x(pdf.l_margin)
+    pdf.multi_cell(0, 6, pdf_safe_text(
+        f"Total original: {t_antes} | Total otimizado: {t_depois} | Economia: {econ} | Eficiência: {eff*100:.1f}%", 220
+    ))
     pdf.set_font("Arial", "", 9)
-    pdf.multi_cell(0, 5, f"Breakdown confiança: IFC={breakdown['IFC']} | Props={breakdown['Props']} | IDs={breakdown['IDs']} | Otim={breakdown['Otim']}")
+    pdf.set_x(pdf.l_margin)
+    pdf.multi_cell(0, 5, pdf_safe_text(
+        f"Breakdown confiança: IFC={breakdown['IFC']} | Props={breakdown['Props']} | IDs={breakdown['IDs']} | Otim={breakdown['Otim']}", 220
+    ))
 
     pdf.ln(2)
     pdf.set_font("Arial", "B", 12)
@@ -734,15 +768,16 @@ def gerar_pdf(
 
     pdf.set_font("Arial", "", 8)
     for _k, info in (dados_ifc or {}).items():
-        pdf.cell(88, 7, str(info.get("nome","N/A"))[:45], 1)
+        pdf.cell(88, 7, pdf_safe_text(info.get("nome","N/A"), 45), 1)
         pdf.cell(20, 7, str(info.get("antes",0)), 1, 0, "C")
         pdf.cell(20, 7, str(info.get("depois",0)), 1, 0, "C")
-        pdf.cell(62, 7, str(info.get("defeito",""))[:34], 1, 1, "L")
+        pdf.cell(62, 7, pdf_safe_text(info.get("defeito",""), 34), 1, 1, "L")
 
     pdf.ln(4)
     pdf.set_font("Arial", "B", 12)
     pdf.cell(0, 8, "4) Registro de mudanças aplicadas no IFC (por #id)", ln=True)
     pdf.set_font("Arial", "", 9)
+    pdf.set_x(pdf.l_margin)
     pdf.multi_cell(0, 5, "Itens marcados no IFC OTIMIZADO via PropertySet (rastreável por #id).")
 
     pdf.set_font("Arial", "B", 8)
@@ -755,15 +790,16 @@ def gerar_pdf(
     pdf.set_font("Arial", "", 8)
     if change_log:
         for ch in change_log[:45]:
-            pdf.cell(16, 7, str(ch.get("ifc_id",""))[:8], 1)
-            pdf.cell(50, 7, str(ch.get("produto",""))[:28], 1)
-            pdf.cell(40, 7, str(ch.get("acao",""))[:22], 1)
-            pdf.cell(84, 7, str(ch.get("motivo",""))[:46], 1, 1)
+            pdf.cell(16, 7, pdf_safe_text(ch.get("ifc_id",""), 8), 1)
+            pdf.cell(50, 7, pdf_safe_text(ch.get("produto",""), 28), 1)
+            pdf.cell(40, 7, pdf_safe_text(ch.get("acao",""), 22), 1)
+            pdf.cell(84, 7, pdf_safe_text(ch.get("motivo",""), 46), 1, 1)
     else:
         pdf.cell(0, 7, "Sem mudanças aplicadas (sem IDs encontrados ou sem economia).", 1, 1)
 
     pdf.ln(6)
     pdf.set_font("Arial", "I", 9)
+    pdf.set_x(pdf.l_margin)
     pdf.multi_cell(0, 5,
         "Obs.: Nesta versão, a otimização altera o IFC com metadados rastreáveis (Pset/Description). "
         "Substituições físicas (tipo/material/geometria) exigem regras BIM específicas por disciplina."
@@ -836,7 +872,7 @@ def gerar_json(
     }
 
 # -----------------------------------------------------------------------------
-# PIPELINE SALVAR (multi-tenant, project_id, sqlite)
+# PIPELINE SALVAR
 # -----------------------------------------------------------------------------
 def salvar_projeto(tenant_id: str, user_id: str, empreendimento: str, disciplina: str, uploaded_file, props: dict) -> None:
     file_bytes = uploaded_file.getvalue()
@@ -845,7 +881,6 @@ def salvar_projeto(tenant_id: str, user_id: str, empreendimento: str, disciplina
     project_id = make_project_id()
     doc_id = make_doc_id(project_id, file_hash)
 
-    # pasta isolada do projeto
     proj_dir = ARTIFACTS_DIR / project_id
     proj_dir.mkdir(parents=True, exist_ok=True)
 
@@ -857,18 +892,16 @@ def salvar_projeto(tenant_id: str, user_id: str, empreendimento: str, disciplina
     change_log: list = []
     has_ids = False
     optimization_applied = False
-
     status = "processing"
 
-    # salva "props" (isolado por tenant/project)
+    # salva props isolado por project_id (não conflita)
     ppath = props_path(tenant_id, project_id, disciplina)
     save_props(tenant_id, project_id, disciplina, props)
 
-    # se for PDF (evidência)
     if is_pdf(original_name):
         evid_path = proj_dir / f"EVIDENCIA_{safe_filename(disciplina)}_{safe_filename(original_name)}_{file_hash[:8]}.pdf"
         evid_path.write_bytes(file_bytes)
-        status = "done"  # não tem otimização IFC aqui
+        status = "done"  # sem IFC
     else:
         ifc_original_path = proj_dir / f"ORIGINAL_{safe_filename(disciplina)}_{safe_filename(original_name)}_{file_hash[:8]}.ifc"
         ifc_original_path.write_bytes(file_bytes)
@@ -884,7 +917,8 @@ def salvar_projeto(tenant_id: str, user_id: str, empreendimento: str, disciplina
 
         ifc_otimizado_path = proj_dir / f"OTIMIZADO_{safe_filename(disciplina)}_{safe_filename(original_name)}_{file_hash[:8]}.ifc"
         ok, msg = apply_optimizations_ifc(
-            ifc_original_path, ifc_otimizado_path, disciplina, change_log, empreendimento, props,
+            ifc_original_path, ifc_otimizado_path,
+            disciplina, change_log, empreendimento, props,
             tenant_id=tenant_id, project_id=project_id
         )
         if ok:
@@ -893,7 +927,7 @@ def salvar_projeto(tenant_id: str, user_id: str, empreendimento: str, disciplina
             status = "done"
         else:
             st.warning(msg)
-            ifc_otimizado_path = ifc_original_path  # fallback (não quebra)
+            ifc_otimizado_path = ifc_original_path
             status = "done_with_warning"
 
     metrics = calcular_metricas(dados_ifc)
@@ -957,10 +991,10 @@ def salvar_projeto(tenant_id: str, user_id: str, empreendimento: str, disciplina
     }
 
     upsert_project(proj_row, files_row)
-    st.success("Concluído. Veja em DOCS para baixar IFC OTIMIZADO e relatório.")
+    st.success("Concluído. Veja em DOCS para baixar IFC OTIMIZADO, JSON técnico e relatório PDF.")
 
 # -----------------------------------------------------------------------------
-# UI
+# UI (Topo)
 # -----------------------------------------------------------------------------
 h1, h2 = st.columns([8,2])
 with h1:
@@ -971,11 +1005,13 @@ st.markdown("---")
 
 tabs = st.tabs(["🚀 Dashboard","⚡ Elétrica","💧 Hidráulica","🏗️ Estrutural","📂 Portfólio","📝 DOCS","🧬 DNA"])
 
+# -----------------------------------------------------------------------------
 # Dashboard
+# -----------------------------------------------------------------------------
 with tabs[0]:
     df = carregar_dados(TENANT_ID)
     if df.empty:
-        st.info("Aguardando processamento.")
+        st.info("Aguardando processamento. Faça upload em Elétrica/Hidráulica/Estrutural.")
         st.caption(f"Tenant: {TENANT_ID} | Engine: {ENGINE_VERSION}")
     else:
         c1,c2,c3,c4 = st.columns(4)
@@ -988,18 +1024,18 @@ with tabs[0]:
         agg = df.groupby("empreendimento", as_index=False)["economia_itens"].sum().sort_values("economia_itens", ascending=False)
         st.bar_chart(agg.set_index("empreendimento")["economia_itens"])
 
-        show = df.sort_values("created_at_iso", ascending=False).head(10).copy()
+        show = df.sort_values("created_at_iso", ascending=False).head(15).copy()
         show["eficiencia_%"] = (show["eficiencia_num"]*100).round(1).astype(str)+"%"
         st.dataframe(
-            show[["empreendimento","disciplina","created_at_br","economia_itens","eficiencia_%","confianca_label","confianca_score","original_name","status"]],
+            show[["empreendimento","disciplina","created_at_br","economia_itens","eficiencia_%","confianca_label","confianca_score","original_name","status","doc_id"]],
             use_container_width=True
         )
 
 # -----------------------------------------------------------------------------
 # PATCH DEFINITIVO: render_props_form (number_input nunca abaixo do min)
 # -----------------------------------------------------------------------------
-def render_props_form(tenant_id: str, disciplina: str, project_id: str, key_prefix: str) -> dict:
-    saved = load_props(tenant_id, project_id, disciplina)
+def render_props_form(tenant_id: str, disciplina: str, ui_project_id: str, key_prefix: str) -> dict:
+    saved = load_props(tenant_id, ui_project_id, disciplina)
     props = dict(saved)
 
     fields = PRO_FIELDS.get(disciplina, [])
@@ -1050,11 +1086,11 @@ def render_props_form(tenant_id: str, disciplina: str, project_id: str, key_pref
         cA, cB = st.columns(2)
         with cA:
             if st.button("💾 Salvar propriedades", key=f"save_{key_prefix}"):
-                save_props(tenant_id, project_id, disciplina, props)
+                save_props(tenant_id, ui_project_id, disciplina, props)
                 st.success("Propriedades salvas.")
         with cB:
             if st.button("↩️ Limpar propriedades", key=f"clear_{key_prefix}"):
-                save_props(tenant_id, project_id, disciplina, {})
+                save_props(tenant_id, ui_project_id, disciplina, {})
                 st.warning("Propriedades limpas.")
                 st.rerun()
 
@@ -1066,19 +1102,24 @@ def upload_form(title: str, disciplina: str, key: str, descricao: str):
     with colA:
         nome = st.text_input("Empreendimento", key=f"nm_{key}")
         st.info(descricao)
-        st.caption("Multiusuário MVP: dados isolados por tenant e project_id.")
+        st.caption(f"Tenant: {TENANT_ID} • Usuário: {USER_ID}")
     with colB:
-        file_obj = st.file_uploader("Envie IFC (otimização por metadados rastreáveis) ou PDF (evidência)", type=["ifc","pdf"], key=f"up_{key}")
+        file_obj = st.file_uploader(
+            "Envie IFC (gera IFC OTIMIZADO rastreável) ou PDF (apenas evidência)",
+            type=["ifc","pdf"],
+            key=f"up_{key}"
+        )
 
     if not file_obj or not nome:
+        st.caption("Preencha o Empreendimento e selecione um arquivo.")
         return
 
-    # Project id pré-criado só para props na UI; o definitivo é criado ao processar.
-    # (isso evita salvar props em arquivo “solto” antes do clique)
-    ui_project_id = st.session_state.get(f"ui_project_{key}")
+    # UI project id apenas para manter props (não é o project_id final)
+    ui_key = f"ui_project_{TENANT_ID}_{key}"
+    ui_project_id = st.session_state.get(ui_key)
     if not ui_project_id:
         ui_project_id = make_project_id()
-        st.session_state[f"ui_project_{key}"] = ui_project_id
+        st.session_state[ui_key] = ui_project_id
 
     props = render_props_form(TENANT_ID, disciplina, ui_project_id, key_prefix=f"prop_{key}")
 
@@ -1106,30 +1147,47 @@ def upload_form(title: str, disciplina: str, key: str, descricao: str):
         st.warning("PDF é apenas evidência. Para gerar IFC OTIMIZADO rastreável, envie um arquivo .IFC.")
 
     if st.button("💾 Processar", key=f"btn_{key}"):
-        # cria project_id definitivo na pipeline
         salvar_projeto(TENANT_ID, USER_ID, nome, disciplina, file_obj, props)
-        # reseta UI project id
-        st.session_state.pop(f"ui_project_{key}", None)
+        # limpa UI project para novas props
+        st.session_state.pop(ui_key, None)
 
-# Disciplinas
+# -----------------------------------------------------------------------------
+# Disciplinas (UPLOAD FUNCIONA)
+# -----------------------------------------------------------------------------
 with tabs[1]:
-    upload_form("Engine Vision (Elétrica) — Profissional", "Eletrica", "eletrica",
-                "Gera IFC OTIMIZADO com rastreio por #id e PropertySets QUANTIX + relatório profissional.")
-with tabs[2]:
-    upload_form("Engine H2O (Hidráulica) — Profissional", "Hidraulica", "hidraulica",
-                "Gera IFC OTIMIZADO com rastreio por #id + evidência técnica.")
-with tabs[3]:
-    upload_form("Engine Structural (Estrutural) — Profissional", "Estrutural", "estrutural",
-                "Gera IFC OTIMIZADO com marcações rastreáveis; próximo passo: regras por propriedades reais.")
+    upload_form(
+        "Engine Vision (Elétrica) — Profissional",
+        "Eletrica",
+        "eletrica",
+        "Gera IFC OTIMIZADO com rastreio por #id e PropertySets QUANTIX + relatório profissional."
+    )
 
+with tabs[2]:
+    upload_form(
+        "Engine H2O (Hidráulica) — Profissional",
+        "Hidraulica",
+        "hidraulica",
+        "Gera IFC OTIMIZADO com rastreio por #id + evidência técnica."
+    )
+
+with tabs[3]:
+    upload_form(
+        "Engine Structural (Estrutural) — Profissional",
+        "Estrutural",
+        "estrutural",
+        "Gera IFC OTIMIZADO com marcações rastreáveis; próximo passo: regras por propriedades reais."
+    )
+
+# -----------------------------------------------------------------------------
 # Portfólio
+# -----------------------------------------------------------------------------
 with tabs[4]:
     df = carregar_dados(TENANT_ID)
     if df.empty:
-        st.info("Nenhum projeto ainda.")
+        st.info("Nenhum projeto ainda. Faça upload em uma das Engines.")
     else:
         dfv = df.sort_values("created_at_iso", ascending=False).reset_index(drop=True)
-        for i, row in dfv.iterrows():
+        for _, row in dfv.iterrows():
             c1,c2,c3,c4,c5 = st.columns([4,2,2,2,1])
             c1.write(f"**{row['empreendimento']}** ({row.get('disciplina','-')})")
             c2.write(f"Economia: **{int(row['economia_itens'])}**")
@@ -1138,13 +1196,16 @@ with tabs[4]:
             if c5.button("🗑️", key=f"del_{row['project_id']}"):
                 excluir_projeto(str(row["project_id"]), TENANT_ID)
 
-# DOCS
+# -----------------------------------------------------------------------------
+# DOCS (BAIXAR TUDO)
+# -----------------------------------------------------------------------------
 with tabs[5]:
     df = carregar_dados(TENANT_ID)
     if df.empty:
-        st.info("Sem documentos ainda.")
+        st.info("Sem documentos ainda. Faça upload e processe um IFC/PDF.")
     else:
-        sel = st.selectbox("Empreendimento:", sorted(df["empreendimento"].unique()))
+        empreendimentos = sorted(df["empreendimento"].unique())
+        sel = st.selectbox("Empreendimento:", empreendimentos, key="docs_emp")
         projetos = df[df["empreendimento"] == sel].sort_values("created_at_iso", ascending=False)
 
         for _, d in projetos.iterrows():
@@ -1154,6 +1215,7 @@ with tabs[5]:
                 f"**Confiança:** {d.get('confianca_label','-')} ({int(d.get('confianca_score',0))}/100) — "
                 f"**Doc ID:** `{d.get('doc_id','-')}` — **Status:** `{d.get('status','-')}`"
             )
+
             c1,c2,c3,c4 = st.columns(4)
 
             pdfp = d.get("relatorio_pdf_path")
@@ -1178,7 +1240,9 @@ with tabs[5]:
 
             st.divider()
 
+# -----------------------------------------------------------------------------
 # DNA (mantido)
+# -----------------------------------------------------------------------------
 with tabs[6]:
     st.markdown("""
     <style>
@@ -1210,7 +1274,9 @@ with tabs[6]:
         </div>
         <div class="dna-sub" style="margin-top:10px;">
             <b>Evidência que vira economia.</b><br>
-            <span style="opacity:0.8;">Tenant atual:</span> <b>{TENANT_ID}</b> • <span style="opacity:0.8;">Usuário:</span> <b>{USER_ID}</b> • <span style="opacity:0.8;">Engine:</span> <b>{ENGINE_VERSION}</b>
+            <span style="opacity:0.8;">Tenant atual:</span> <b>{TENANT_ID}</b> •
+            <span style="opacity:0.8;">Usuário:</span> <b>{USER_ID}</b> •
+            <span style="opacity:0.8;">Engine:</span> <b>{ENGINE_VERSION}</b>
         </div>
     </div>
     """, unsafe_allow_html=True)
