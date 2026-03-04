@@ -9,7 +9,14 @@
 # - Aba DOCS mostra e permite baixar IFC/JSON/PDF por tenant
 # - Exclusão por project_id (correta)
 # - PDF: Doc ID fixo + prevenção do erro "Not enough horizontal space..."
-# - IFC: aplica Pset com dedup e marca Description com tenant/project
+#
+# ✅ Upgrades solicitados (BIMcollab-friendly):
+# 1) Grupo IFC automático: IfcGroup "Quantix_Optimized_Elements"
+#    - Todos os elementos marcados entram no grupo (seleção 1-clique em viewers que suportam Groups)
+# 2) Mapa visual no IFC (tentativa via ifcopenshell.api style):
+#    - Elementos otimizados ficam LARANJA
+#    - Elementos com motivo indicando conflito/interferência ("clash", "interfer", "conflit") ficam VERMELHOS
+#    - Se o viewer não suportar/instalação não suportar style API, o app segue (sem quebrar) e mantém Pset/Grupo.
 #
 # ⚠️ requirements.txt mínimo:
 # streamlit==1.54.0
@@ -40,7 +47,7 @@ from fpdf import FPDF
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s - %(message)s")
 logger = logging.getLogger("quantix")
 
-ENGINE_VERSION = "2026.03.04-multiuser-mvp+pdfsafe"
+ENGINE_VERSION = "2026.03.04-multiuser-mvp+pdfsafe+group+stylemap"
 
 # -----------------------------------------------------------------------------
 # STREAMLIT
@@ -147,7 +154,6 @@ def file_sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 def decode_ifc_text(file_bytes: bytes) -> str:
-    # replace ajuda a ver perdas e evita crashes
     try:
         return file_bytes.decode("utf-8", errors="replace")
     except Exception:
@@ -166,12 +172,6 @@ def make_doc_id(project_id: str, file_hash: str) -> str:
     return hashlib.sha1(f"{project_id}|{file_hash}".encode("utf-8")).hexdigest()[:8].upper()
 
 def pdf_safe_text(s: Any, max_len: int = 220) -> str:
-    """
-    Evita crashes no fpdf2:
-    - normaliza caracteres
-    - trunca texto muito longo
-    - quebra strings longas sem espaços (hash/path)
-    """
     t = "" if s is None else str(s)
     t = t.replace("\r", " ").replace("\n", " ").replace("\t", " ")
     t = t.replace("–", "-").replace("—", "-")
@@ -184,6 +184,10 @@ def pdf_safe_text(s: Any, max_len: int = 220) -> str:
         t = " ".join([t[i:i+32] for i in range(0, len(t), 32)])
 
     return t
+
+def is_conflict_motive(motivo: str) -> bool:
+    m = (motivo or "").lower()
+    return any(x in m for x in ["clash", "interfer", "conflit", "colis", "colisão", "interferência", "interferencia"])
 
 # -----------------------------------------------------------------------------
 # DB (SQLite)
@@ -333,7 +337,6 @@ def excluir_projeto(project_id: str, tenant_id: str) -> None:
     try:
         proj_dir = ARTIFACTS_DIR / project_id
         if proj_dir.exists():
-            # remove só se vazio
             try:
                 proj_dir.rmdir()
             except Exception:
@@ -530,13 +533,15 @@ def build_change_log(dados_ifc: dict, ids_map: Dict[str, List[str]]) -> List[Dic
         ids = ids_map.get(cls, [])
         pick = ids[: min(delta, len(ids))]
         for eid in pick:
+            motivo = str(info.get("defeito", ""))
             changes.append({
                 "ifc_id": eid,
                 "classe": cls,
                 "produto": info.get("nome", cls),
                 "acao": "OTIMIZAÇÃO APLICADA (Pset QUANTIX)",
-                "motivo": info.get("defeito", ""),
+                "motivo": motivo,
                 "referencia": info.get("ciencia", ""),
+                "tag_visual": "RED" if is_conflict_motive(motivo) else "ORANGE",
             })
     return changes
 
@@ -577,7 +582,7 @@ def confidence_0_100(
     return total, label, breakdown
 
 # -----------------------------------------------------------------------------
-# IFC OTIMIZADO (ifcopenshell)
+# IFC OTIMIZADO (ifcopenshell) + GROUP + STYLE MAP
 # -----------------------------------------------------------------------------
 def try_import_ifcopenshell():
     try:
@@ -588,9 +593,7 @@ def try_import_ifcopenshell():
         return None
 
 def _get_or_create_pset(ifcopenshell, model, ent, pset_name: str):
-    """
-    Dedup de Pset: se já existir, retorna o existente; senão cria.
-    """
+    # Dedup de Pset: se já existir, retorna o existente; senão cria.
     try:
         psets = getattr(ent, "IsDefinedBy", None)
         if psets:
@@ -606,6 +609,68 @@ def _get_or_create_pset(ifcopenshell, model, ent, pset_name: str):
 
     import ifcopenshell.api  # type: ignore
     return ifcopenshell.api.run("pset.add_pset", model, product=ent, name=pset_name)
+
+def _ensure_quantix_styles(ifcopenshell, model):
+    """
+    Cria estilos (laranja/vermelho) usando ifcopenshell.api, se disponível.
+    Retorna dict com {"ORANGE": style_obj, "RED": style_obj} (pode falhar e retornar {}).
+    """
+    styles = {}
+    try:
+        import ifcopenshell.api  # type: ignore
+
+        # ORANGE
+        style_orange = ifcopenshell.api.run("style.add_style", model, name="Quantix_Optimized_Orange")
+        try:
+            ifcopenshell.api.run(
+                "style.add_surface_style",
+                model,
+                style=style_orange,
+                ifc_class="IfcSurfaceStyleShading",
+                attributes={"SurfaceColour": {"Red": 1.0, "Green": 0.62, "Blue": 0.0}}
+            )
+        except Exception:
+            # alguns builds usam Rendering em vez de Shading
+            ifcopenshell.api.run(
+                "style.add_surface_style",
+                model,
+                style=style_orange,
+                ifc_class="IfcSurfaceStyleRendering",
+                attributes={"SurfaceColour": {"Red": 1.0, "Green": 0.62, "Blue": 0.0}}
+            )
+
+        # RED
+        style_red = ifcopenshell.api.run("style.add_style", model, name="Quantix_Optimized_Red")
+        try:
+            ifcopenshell.api.run(
+                "style.add_surface_style",
+                model,
+                style=style_red,
+                ifc_class="IfcSurfaceStyleShading",
+                attributes={"SurfaceColour": {"Red": 1.0, "Green": 0.15, "Blue": 0.15}}
+            )
+        except Exception:
+            ifcopenshell.api.run(
+                "style.add_surface_style",
+                model,
+                style=style_red,
+                ifc_class="IfcSurfaceStyleRendering",
+                attributes={"SurfaceColour": {"Red": 1.0, "Green": 0.15, "Blue": 0.15}}
+            )
+
+        styles["ORANGE"] = style_orange
+        styles["RED"] = style_red
+    except Exception:
+        return {}
+    return styles
+
+def _assign_style_to_product(ifcopenshell, model, product, style_obj) -> bool:
+    try:
+        import ifcopenshell.api  # type: ignore
+        ifcopenshell.api.run("style.assign_style", model, product=product, style=style_obj)
+        return True
+    except Exception:
+        return False
 
 def apply_optimizations_ifc(
     ifc_in_path: Path,
@@ -625,6 +690,7 @@ def apply_optimizations_ifc(
         model = ifcopenshell.open(str(ifc_in_path))
         import ifcopenshell.api  # type: ignore
 
+        # carimbo no projeto
         try:
             proj = model.by_type("IfcProject")[0]
             stamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -634,6 +700,12 @@ def apply_optimizations_ifc(
 
         compact = "; ".join([f"{k}={v}" for k, v in props.items() if str(v).strip()][:12])[:250]
 
+        optimized_elements: List[Any] = []
+        optimized_ids: set = set()
+
+        # prepara estilos (pode falhar e ficar vazio)
+        styles = _ensure_quantix_styles(ifcopenshell, model)
+
         for ch in change_log:
             try:
                 eid_num = int(str(ch["ifc_id"]).replace("#", ""))
@@ -641,7 +713,19 @@ def apply_optimizations_ifc(
                 if not ent:
                     continue
 
+                # evita duplicar
+                if eid_num in optimized_ids:
+                    continue
+                optimized_ids.add(eid_num)
+                optimized_elements.append(ent)
+
+                # PSET
                 pset = _get_or_create_pset(ifcopenshell, model, ent, "Pset_QuantixOptimization")
+
+                tag_visual = str(ch.get("tag_visual", "ORANGE")).upper()
+                if tag_visual not in ("ORANGE", "RED"):
+                    tag_visual = "ORANGE"
+
                 ifcopenshell.api.run("pset.edit_pset", model, pset=pset, properties={
                     "TenantId": tenant_id,
                     "ProjectId": project_id,
@@ -654,18 +738,48 @@ def apply_optimizations_ifc(
                     "Referencia": str(ch.get("referencia","")),
                     "ContextoCliente": compact,
                     "EngineVersion": ENGINE_VERSION,
+                    "QuantixOptimized": "TRUE",
+                    "QuantixVisualTag": tag_visual,
                     "Timestamp": now_iso(),
                 })
 
+                # Description-tag (busca textual)
                 try:
-                    ent.Description = (ent.Description or "") + f" | QUANTIX:{ch['ifc_id']}:{project_id}"
+                    ent.Description = (ent.Description or "") + f" | QUANTIX:{ch['ifc_id']}:{project_id}:{tag_visual}"
                 except Exception:
                     pass
+
+                # STYLE MAP (se styles existir e o viewer suportar)
+                if styles and tag_visual in styles:
+                    _assign_style_to_product(ifcopenshell, model, ent, styles[tag_visual])
+
             except Exception:
                 continue
 
+        # 1) UPGRADE: Grupo com todos otimizados
+        try:
+            if optimized_elements:
+                group = model.create_entity(
+                    "IfcGroup",
+                    GlobalId=ifcopenshell.guid.new(),
+                    Name="Quantix_Optimized_Elements",
+                    Description=f"Elementos otimizados automaticamente pelo Quantix Engine | {tenant_id}/{project_id}"
+                )
+                model.create_entity(
+                    "IfcRelAssignsToGroup",
+                    GlobalId=ifcopenshell.guid.new(),
+                    RelatedObjects=optimized_elements,
+                    RelatingGroup=group
+                )
+        except Exception:
+            pass
+
         model.write(str(ifc_out_path))
-        return True, "IFC OTIMIZADO gerado (Pset_QuantixOptimization aplicado)."
+
+        if styles:
+            return True, "IFC OTIMIZADO gerado: Pset + Grupo (Quantix_Optimized_Elements) + Mapa visual (laranja/vermelho)."
+        return True, "IFC OTIMIZADO gerado: Pset + Grupo (Quantix_Optimized_Elements). (Mapa visual não aplicado neste ambiente.)"
+
     except Exception as e:
         return False, f"Falha ao escrever IFC: {e}"
 
@@ -734,7 +848,6 @@ def gerar_pdf(
     if props:
         for k, v in list(props.items())[:18]:
             if str(v).strip():
-                # garante largura útil (evita crash do fpdf2)
                 pdf.set_x(pdf.l_margin)
                 pdf.multi_cell(0, 5, f"- {pdf_safe_text(k, 60)}: {pdf_safe_text(v, 220)}")
     else:
@@ -778,14 +891,14 @@ def gerar_pdf(
     pdf.cell(0, 8, "4) Registro de mudanças aplicadas no IFC (por #id)", ln=True)
     pdf.set_font("Arial", "", 9)
     pdf.set_x(pdf.l_margin)
-    pdf.multi_cell(0, 5, "Itens marcados no IFC OTIMIZADO via PropertySet (rastreável por #id).")
+    pdf.multi_cell(0, 5, "Itens marcados no IFC OTIMIZADO via PropertySet e agrupados em 'Quantix_Optimized_Elements'.")
 
     pdf.set_font("Arial", "B", 8)
     pdf.set_fill_color(230)
     pdf.cell(16, 7, "IFC", 1, 0, "C", 1)
     pdf.cell(50, 7, "Produto", 1, 0, "L", 1)
     pdf.cell(40, 7, "Ação", 1, 0, "L", 1)
-    pdf.cell(84, 7, "Motivo", 1, 1, "L", 1)
+    pdf.cell(84, 7, "Motivo (tag)", 1, 1, "L", 1)
 
     pdf.set_font("Arial", "", 8)
     if change_log:
@@ -793,7 +906,8 @@ def gerar_pdf(
             pdf.cell(16, 7, pdf_safe_text(ch.get("ifc_id",""), 8), 1)
             pdf.cell(50, 7, pdf_safe_text(ch.get("produto",""), 28), 1)
             pdf.cell(40, 7, pdf_safe_text(ch.get("acao",""), 22), 1)
-            pdf.cell(84, 7, pdf_safe_text(ch.get("motivo",""), 46), 1, 1)
+            motivo_tag = f"{pdf_safe_text(ch.get('motivo',''), 40)} [{ch.get('tag_visual','ORANGE')}]"
+            pdf.cell(84, 7, pdf_safe_text(motivo_tag, 46), 1, 1)
     else:
         pdf.cell(0, 7, "Sem mudanças aplicadas (sem IDs encontrados ou sem economia).", 1, 1)
 
@@ -801,8 +915,9 @@ def gerar_pdf(
     pdf.set_font("Arial", "I", 9)
     pdf.set_x(pdf.l_margin)
     pdf.multi_cell(0, 5,
-        "Obs.: Nesta versão, a otimização altera o IFC com metadados rastreáveis (Pset/Description). "
-        "Substituições físicas (tipo/material/geometria) exigem regras BIM específicas por disciplina."
+        "Obs.: Nesta versão, a otimização altera o IFC com metadados rastreáveis (Pset/Description), "
+        "e cria um grupo com os elementos otimizados. O mapa visual tenta aplicar estilos (laranja/vermelho) "
+        "para facilitar revisão em viewers."
     )
 
     out = out_dir / f"RELATORIO_{safe_filename(disciplina)}_{safe_filename(empreendimento)}_{file_hash[:8]}_{project_id[:8]}.pdf"
@@ -869,6 +984,13 @@ def gerar_json(
         },
         "recomendacoes_resumo": recs[:250],
         "registro_mudancas_aplicadas": change_log[:800],
+        "visual_map": {
+            "group_name": "Quantix_Optimized_Elements",
+            "tags": {
+                "ORANGE": "Otimizado (geral)",
+                "RED": "Conflito/Interferência (prioridade)",
+            }
+        }
     }
 
 # -----------------------------------------------------------------------------
@@ -894,7 +1016,6 @@ def salvar_projeto(tenant_id: str, user_id: str, empreendimento: str, disciplina
     optimization_applied = False
     status = "processing"
 
-    # salva props isolado por project_id (não conflita)
     ppath = props_path(tenant_id, project_id, disciplina)
     save_props(tenant_id, project_id, disciplina, props)
 
@@ -1032,7 +1153,7 @@ with tabs[0]:
         )
 
 # -----------------------------------------------------------------------------
-# PATCH DEFINITIVO: render_props_form (number_input nunca abaixo do min)
+# PATCH: render_props_form (number_input nunca abaixo do min)
 # -----------------------------------------------------------------------------
 def render_props_form(tenant_id: str, disciplina: str, ui_project_id: str, key_prefix: str) -> dict:
     saved = load_props(tenant_id, ui_project_id, disciplina)
@@ -1114,7 +1235,6 @@ def upload_form(title: str, disciplina: str, key: str, descricao: str):
         st.caption("Preencha o Empreendimento e selecione um arquivo.")
         return
 
-    # UI project id apenas para manter props (não é o project_id final)
     ui_key = f"ui_project_{TENANT_ID}_{key}"
     ui_project_id = st.session_state.get(ui_key)
     if not ui_project_id:
@@ -1123,7 +1243,6 @@ def upload_form(title: str, disciplina: str, key: str, descricao: str):
 
     props = render_props_form(TENANT_ID, disciplina, ui_project_id, key_prefix=f"prop_{key}")
 
-    # prévia confiança (sem escrever IFC ainda)
     file_bytes = file_obj.getvalue()
     file_hash = file_sha256(file_bytes)
 
@@ -1148,18 +1267,15 @@ def upload_form(title: str, disciplina: str, key: str, descricao: str):
 
     if st.button("💾 Processar", key=f"btn_{key}"):
         salvar_projeto(TENANT_ID, USER_ID, nome, disciplina, file_obj, props)
-        # limpa UI project para novas props
         st.session_state.pop(ui_key, None)
 
-# -----------------------------------------------------------------------------
 # Disciplinas (UPLOAD FUNCIONA)
-# -----------------------------------------------------------------------------
 with tabs[1]:
     upload_form(
         "Engine Vision (Elétrica) — Profissional",
         "Eletrica",
         "eletrica",
-        "Gera IFC OTIMIZADO com rastreio por #id e PropertySets QUANTIX + relatório profissional."
+        "Gera IFC OTIMIZADO com rastreio por #id, PropertySets QUANTIX, Grupo e Mapa Visual + relatório profissional."
     )
 
 with tabs[2]:
@@ -1167,7 +1283,7 @@ with tabs[2]:
         "Engine H2O (Hidráulica) — Profissional",
         "Hidraulica",
         "hidraulica",
-        "Gera IFC OTIMIZADO com rastreio por #id + evidência técnica."
+        "Gera IFC OTIMIZADO com rastreio por #id, Grupo e Mapa Visual + evidência técnica."
     )
 
 with tabs[3]:
@@ -1175,12 +1291,10 @@ with tabs[3]:
         "Engine Structural (Estrutural) — Profissional",
         "Estrutural",
         "estrutural",
-        "Gera IFC OTIMIZADO com marcações rastreáveis; próximo passo: regras por propriedades reais."
+        "Gera IFC OTIMIZADO com marcações rastreáveis, Grupo e Mapa Visual; próximo passo: regras por propriedades reais."
     )
 
-# -----------------------------------------------------------------------------
 # Portfólio
-# -----------------------------------------------------------------------------
 with tabs[4]:
     df = carregar_dados(TENANT_ID)
     if df.empty:
@@ -1196,9 +1310,7 @@ with tabs[4]:
             if c5.button("🗑️", key=f"del_{row['project_id']}"):
                 excluir_projeto(str(row["project_id"]), TENANT_ID)
 
-# -----------------------------------------------------------------------------
-# DOCS (BAIXAR TUDO)
-# -----------------------------------------------------------------------------
+# DOCS
 with tabs[5]:
     df = carregar_dados(TENANT_ID)
     if df.empty:
@@ -1207,6 +1319,9 @@ with tabs[5]:
         empreendimentos = sorted(df["empreendimento"].unique())
         sel = st.selectbox("Empreendimento:", empreendimentos, key="docs_emp")
         projetos = df[df["empreendimento"] == sel].sort_values("created_at_iso", ascending=False)
+
+        st.info("No BIMcollab ZOOM, procure por 'Groups' → 'Quantix_Optimized_Elements' e/ou filtre pelo Pset 'Pset_QuantixOptimization'. "
+                "Mapa visual: laranja=otimizado, vermelho=conflito/interferência (se o viewer suportar estilos).")
 
         for _, d in projetos.iterrows():
             st.markdown(
@@ -1240,9 +1355,7 @@ with tabs[5]:
 
             st.divider()
 
-# -----------------------------------------------------------------------------
 # DNA (mantido)
-# -----------------------------------------------------------------------------
 with tabs[6]:
     st.markdown("""
     <style>
@@ -1270,7 +1383,7 @@ with tabs[6]:
         <h1><span class="q">QUANTI</span><span class="x">X</span> STRATEGIC</h1>
         <div class="dna-sub">
             A QUANTIX transforma projetos em decisões técnicas rastreáveis.
-            Cada intervenção possui justificativa, registro e evidência.
+            Cada intervenção possui justificativa, registro, grupo e evidência.
         </div>
         <div class="dna-sub" style="margin-top:10px;">
             <b>Evidência que vira economia.</b><br>
@@ -1289,7 +1402,6 @@ with tabs[6]:
         <p>
             Responsável pela quantificação estruturada do modelo,
             validação de consistência técnica e organização métrica do projeto.
-            O QUANTI elimina análise superficial e transforma o arquivo em base confiável para decisão.
         </p>
         <div class="dna-micro">MÉTRICA • CONFORMIDADE • PRECISÃO</div>
     </div>
@@ -1300,8 +1412,7 @@ with tabs[6]:
         <h3 style="color:#FF9F00;">NÚCLEO X</h3>
         <p>
             Responsável pela otimização e identificação de interferências.
-            Atua antes da obra começar, reduzindo desperdício, consolidando elementos
-            e registrando intervenções com rastreabilidade por elemento IFC.
+            Agora, além do rastreio por #id, cria um grupo no IFC e tenta aplicar mapa visual (cores).
         </p>
         <div class="dna-micro">OTIMIZAÇÃO • COMPATIBILIZAÇÃO • ESCALA</div>
     </div>
@@ -1313,7 +1424,6 @@ with tabs[6]:
         <p>
             Score calculado com base em propriedades técnicas preenchidas,
             rastreabilidade por #id no IFC e evidência documental gerada.
-            Quanto maior o contexto e a transparência, maior a confiabilidade do projeto.
         </p>
         <div class="dna-micro">SCORE 0–100 • EVIDÊNCIA • TRANSPARÊNCIA</div>
     </div>
@@ -1323,11 +1433,10 @@ with tabs[6]:
     <div class="dna-node">
         <h3>CAMADA DE RASTREIO</h3>
         <p>
-            Cada intervenção é marcada no IFC com PropertySets QUANTIX.
-            O relatório informa o que foi alterado, por que foi alterado
-            e exatamente em qual elemento (#id) ocorreu a modificação.
+            Cada intervenção é marcada no IFC com PropertySets QUANTIX,
+            agrupada em <b>Quantix_Optimized_Elements</b> e registrada no relatório/JSON.
         </p>
-        <div class="dna-micro">#ID • PROPERTYSETS • AUDITORIA TOTAL</div>
+        <div class="dna-micro">#ID • PROPERTYSETS • GRUPOS • AUDITORIA</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -1337,13 +1446,6 @@ with tabs[6]:
         <p>
             A QUANTIX nasceu da observação prática de um problema recorrente na construção civil:
             perdas financeiras significativas originadas na fase de projetos.
-            Incompatibilidades, retrabalhos invisíveis e decisões sem rastreabilidade
-            geravam custos que só apareciam durante a execução.
-        </p>
-        <p style="margin-top:12px;">
-            Lucas Teitelbaum identificou essa falha estrutural e decidiu criar
-            um sistema capaz de antecipar erros, documentar intervenções
-            e transformar análise técnica em vantagem competitiva.
         </p>
         <p style="margin-top:12px;">
             <b>Lucas Teitelbaum</b><br>
